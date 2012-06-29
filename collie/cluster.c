@@ -142,6 +142,8 @@ static int cluster_info(int argc, char **argv)
 	return EXIT_SUCCESS;
 }
 
+
+
 static int cluster_shutdown(int argc, char **argv)
 {
 	int fd, ret;
@@ -234,6 +236,19 @@ static int cluster_recover(int argc, char **argv)
 	return EXIT_SUCCESS;
 }
 
+/*++++++++lingyun++++++++++*/
+static int cluster_close(int argc, char **argv)
+{
+
+}
+
+static int cluster_wakeup(int argc, char **argv)
+{
+
+}
+
+
+
 static struct subcommand cluster_cmd[] = {
 	{"info", NULL, "aprh", "show cluster information",
 	 0, cluster_info},
@@ -277,6 +292,10 @@ static int cluster_parser(int ch, char *opt)
 		break;
 	case 'f':
 		cluster_cmd_data.force = 1;
+		break;
+	/*+++++++++lingyun++++++++++*/
+	case 'z':
+		sdzone = opt; 
 		break;
 	}
 

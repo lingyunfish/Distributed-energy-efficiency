@@ -39,6 +39,11 @@
 #define SD_OP_GET_VDI_ATTR   0x89
 #define SD_OP_RECOVER	     0x8A
 
+/*+++++++++++++++lingyun++++++++++++*/
+#define SD_OP_CLOSE 		 0X8B
+#define SD_OP_WAKEUP		 0X8C
+/*+++++++++++++++end++++++++++++++*/
+
 #define SD_FLAG_CMD_IO_LOCAL   0x0010
 #define SD_FLAG_CMD_RECOVERY 0x0020
 

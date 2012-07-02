@@ -239,12 +239,43 @@ static int cluster_recover(int argc, char **argv)
 /*++++++++lingyun++++++++++*/
 static int cluster_close(int argc, char **argv)
 {
+	int fd, ret;
+	struct sd_close_req hdr;
+	struct sd_close_rsp *rsp = (struct sd_rsp *)&hdr;
+	unsigned rlen, wlen;
 
+
+	fd = connect_to(sdhost, sdport);
+	if (fd < 0)
+		return EXIT_SYSFAIL;
+	memset(&hdr, 0, sizeof(hdr));
+
+	hdr.opcode = SD_OP_CLOSE;
+	hdr.epoch = node_list_version;
+	hdr.zone = sdzone;
+
+	rlen = 0;
+	wlen = 0;
+	ret = exec_req(fd, &hdr, NULL, &wlen, &rlen);
+	close(fd);
+
+	if (ret) {
+		fprintf(stderr, "Failed to connect\n");
+		return EXIT_SYSFAIL;
+	}
+
+	if (rsp->result != SD_RES_SUCCESS) {
+		fprintf(stderr, "CLOSE failed: %s\n",
+				sd_strerror(rsp->result));
+		return EXIT_FAILURE;
+	}
+
+	return EXIT_SUCCESS;
 }
 
 static int cluster_wakeup(int argc, char **argv)
 {
-
+	return EXIT_SUCCESS;
 }
 
 

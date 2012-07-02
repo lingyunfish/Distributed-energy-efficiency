@@ -32,6 +32,14 @@
 #define SD_STATUS_SHUTDOWN          0x00000008
 #define SD_STATUS_JOIN_FAILED       0x00000010
 #define SD_STATUS_HALT              0x00000020
+/*++++++++++lingyun++++++++++++++++++*/
+#define SD_STATUS_SWITCH 			0x00000040
+#define SD_STATUS_LOWPOWER			0X00000080
+
+#define SD_NODE_CLOSE 				0XB1
+#define SD_NODE_LIVE				0XB2
+/*+++++++++++end+++++++++++++++++++*/
+
 
 #define SD_RES_NETWORK_ERROR    0x81 /* Network error between sheep */
 

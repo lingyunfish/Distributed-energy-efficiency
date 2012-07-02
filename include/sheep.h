@@ -147,6 +147,9 @@ struct sheepdog_node_list_entry {
 	uint16_t        port;
 	uint16_t	nr_vnodes;
 	uint32_t	zone;
+	/*+++++lingyun++++++*/
+	uint8_t state;
+	/*+++++end++++++++*/
 };
 
 struct sheepdog_vnode_list_entry {
@@ -155,6 +158,9 @@ struct sheepdog_vnode_list_entry {
 	uint16_t        port;
 	uint16_t	node_idx;
 	uint32_t	zone;
+	/*+++++lingyun++++++*/
+	uint8_t state;
+	/*++++++end+++++++*/
 };
 
 struct epoch_log {
@@ -274,6 +280,9 @@ static inline const char *sd_strerror(int err)
 		{SD_RES_NOT_FORMATTED, "Cluster has not been formatted"},
 		{SD_RES_INVALID_CTIME, "Creation times differ"},
 		{SD_RES_INVALID_EPOCH, "Invalid epoch"},
+		/*+++++++++++++lingyun+++++++++++++++++++*/
+		{SD_RES_SWITCH,"cluster power mode is switching"}, 
+		/*++++++++++++++end++++++++++++++++++++*/
 	};
 
 	for (i = 0; i < ARRAY_SIZE(errors); ++i)
@@ -333,6 +342,9 @@ static inline int nodes_to_vnodes(struct sheepdog_node_list_entry *nodes, int nr
 				vnodes[nr_vnodes].port = n->port;
 				vnodes[nr_vnodes].node_idx = n - nodes;
 				vnodes[nr_vnodes].zone = n->zone;
+				/*+++++++lingyun+++++++++++*/
+				vnodes[nr_vnodes].state = n->state;
+				/*+++++++end+++++++++++++*/
 			}
 
 			nr_vnodes++;

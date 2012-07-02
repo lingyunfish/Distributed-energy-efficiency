@@ -297,6 +297,10 @@ static int local_stat_cluster(const struct sd_req *req, struct sd_rsp *rsp,
 		return SD_RES_JOIN_FAILED;
 	case SD_STATUS_HALT:
 		return SD_RES_HALT;
+	/*+++++++lingyun++++++++++*/
+	case SD_STATUS_SWITCH:
+		return SD_RES_SWITCH;
+	/*+++++++end++++++++++++*/
 	default:
 		return SD_RES_SYSTEM_ERROR;
 	}
@@ -383,6 +387,47 @@ out:
 	return ret;
 }
 
+/*+++++++++++lingyun++++++++++++++++*/
+void set_node_status(int zone,int status)
+{
+	int i = 0,nr_vnodes;
+	struct sheepdog_node_list_entry *node_list = sys->nodes;
+	struct sheepdog_vnode_list_entry *vnode_list = sys->vnodes;
+
+	while(i < sys->nr_nodes){
+		if( node_list[i].zone == zone){
+			node_list[i].state = status;
+		}
+	}
+	//free_ordered_sd_vnode_list(sys->vnodes);
+	nr_vnodes = nodes_to_vnodes(sys->nodes,sys->nr_nodes,sys->vnodes);
+	sys->nr_vnodes = nr_vnodes;
+	
+}
+static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
+				void *data)
+{
+	
+	int s, nr_zones = 0,nr_objs =0 ,ret = SD_RES_SUCCESS;
+	int zone,epoch;
+	struct vnodes_cache *cache;
+	s = SD_STATUS_SWITCH;
+	struct sd_close_req *hdr = (struct sd_close_req *)req;
+	vprintf(SDOG_DEBUG,"node:%s is start closeing\n",node_to_str(sys->this_node));
+	zone = hdr->zone;
+	epoch = hdr->epoch;
+	sys_stat_set(s);
+	set_node_status(zone,SD_NODE_CLOSE);
+	/*clean the vnode cache*/
+	free_orderd_cache();
+	s = SD_STATUS_OK;
+	sys_stat_set(s);
+	return SD_RES_SUCCESS;
+	
+}
+
+/*+++++++++++end++++++++++++++++++*/
+
 static struct sd_op_template sd_ops[] = {
 
 	/* cluster operations */
@@ -432,6 +477,20 @@ static struct sd_op_template sd_ops[] = {
 		.force = 1,
 		.process_main = cluster_manual_recover,
 	},
+
+	/*++++++++++lingyun+++++++++*/
+	[SD_OP_CLOSE] = {
+		.type = SD_OP_TYPE_CLUSTER,
+		.force = 1,
+		.process_main = cluster_manual_close,
+	},
+
+	/*[SD_OP_WAKEUP] = {
+		.type = SD_OP_TYPE_CLUSTER,
+		.force = 1,
+		.process_main = cluster_manual_wakeup,
+	},*/
+	/*++++++++++end+++++++++++*/
 
 	/* local operations */
 	[SD_OP_READ_VDIS] = {

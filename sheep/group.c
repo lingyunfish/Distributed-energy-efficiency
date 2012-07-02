@@ -135,11 +135,16 @@ struct vnodes_cache {
 	int refcnt;
 	struct list_head list;
 };
+/*++++++++lingyun++++++++++++++*/
+static LIST_HEAD(vnodes_list);
+/*++++++++end++++++++++++++++*/
 
 int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 			      int *nr_vnodes, int *nr_zones)
 {
-	static LIST_HEAD(vnodes_list);
+	/*++++++++++++++lingyun++++++++++++++*/
+	//static LIST_HEAD(vnodes_list);
+	/*++++++++++++++end+++++++++++++++*/
 	struct vnodes_cache *cache;
 
 	list_for_each_entry(cache, &vnodes_list, list) {
@@ -188,6 +193,21 @@ void free_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry *entries)
 		free(cache);
 	}
 }
+
+/*++++++++++++++++lingyun+++++++++++++++++*/
+void free_orderd_cache(void)
+{
+	struct vnodes_cache *cache;
+
+	list_for_each_entry(cache, &vnodes_list, list) {
+		if(cache->epoch == sys->epoch){
+			list_del(&cache->list);
+			free(cache);
+		}
+			
+	}
+}
+/*+++++++++++++++++end++++++++++++++++++*/
 
 void setup_ordered_sd_vnode_list(struct request *req)
 {
@@ -1390,6 +1410,10 @@ int create_cluster(int port, int64_t zone)
 		sys->this_node.zone = b[0] | b[1] << 8 | b[2] << 16 | b[3] << 24;
 	} else
 		sys->this_node.zone = zone;
+	/*+++++++lingyun++++++++*/
+	sys->this_node.state = SD_NODE_LIVE;
+	/*++++++++end+++++++++*/
+	
 	dprintf("zone id = %u\n", sys->this_node.zone);
 
 	if (get_latest_epoch() == 0)

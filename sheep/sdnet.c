@@ -99,8 +99,9 @@ static void io_op_done(struct work *work)
 	     req->rp.result == SD_RES_NEW_NODE_VER ||
 	     req->rp.result == SD_RES_NETWORK_ERROR ||
 	     req->rp.result == SD_RES_WAIT_FOR_JOIN ||
-	     req->rp.result == SD_RES_WAIT_FOR_FORMAT)) {
-
+	     req->rp.result == SD_RES_WAIT_FOR_FORMAT ||
+	     req->rp.result == SD_RES_SWITCH)) {
+		/*++++++++++lingyun end +++++++++*/
 		req->rq.epoch = sys->epoch;
 		setup_ordered_sd_vnode_list(req);
 		setup_access_to_local_objects(req);
@@ -228,6 +229,14 @@ static void queue_request(struct request *req)
 			goto done;
 		}
 		break;
+	/*++++++++++++lingyun+++++++++++++*/
+	case SD_STATUS_SWITCH:
+		if(!is_force_op(req->op)){
+			rsp->result = SD_RES_SWITCH;
+			goto done;
+		}
+		break;
+	/*++++++++++++end+++++++++++++++*/
 	default:
 		break;
 	}

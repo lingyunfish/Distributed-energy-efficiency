@@ -60,6 +60,10 @@
 #define SD_RES_HALT 0x19 /* Sheepdog is stopped doing IO */
 #define SD_RES_MANUAL_RECOVER   0x1A /* Users should not manually recover this cluster */
 
+/*+++++++++lingyun++++++++++++++++*/
+#define SD_RES_SWITCH 0X1B /*cluster power mode is switching*/
+/*++++++++++end+++++++++++++++++*/
+
 /*
  * Object ID rules
  *
@@ -167,6 +171,29 @@ struct sd_vdi_rsp {
 	uint32_t        pad[3];
 };
 
+/*++++++++lingyun+++++++++*/
+struct sd_close_req{
+	uint8_t		proto_ver;
+	uint8_t		opcode;
+	uint16_t	flags;
+	uint32_t	epoch;
+	uint32_t    id;
+	uint32_t    data_length;
+	uint32_t 	zone; //close zone id
+	uint32_t	pad[7];
+};
+
+struct sd_close_rsp{
+	uint8_t		proto_ver;
+	uint8_t		opcode;
+	uint16_t	flags;
+	uint32_t	epoch;
+	uint32_t        id;
+	uint32_t        data_length;
+	uint32_t        result;
+	uint32_t	pad[7];
+}
+/*++++++++end+++++++++++*/
 struct sheepdog_inode {
 	char name[SD_MAX_VDI_LEN];
 	char tag[SD_MAX_VDI_TAG_LEN];

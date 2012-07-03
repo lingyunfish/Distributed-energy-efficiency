@@ -60,6 +60,10 @@
 #define SD_RES_HALT 0x19 /* Sheepdog is stopped doing IO */
 #define SD_RES_MANUAL_RECOVER   0x1A /* Users should not manually recover this cluster */
 
+/*++++++++lingyun++++++++++*/
+#define SD_RES_NO_ZONE 		  0X1C
+/*+++++++++end++++++++++*/
+
 /*+++++++++lingyun++++++++++++++++*/
 #define SD_RES_SWITCH 0X1B /*cluster power mode is switching*/
 /*++++++++++end+++++++++++++++++*/
@@ -153,7 +157,10 @@ struct sd_vdi_req {
 	uint32_t        base_vdi_id;
 	uint32_t	copies;
 	uint32_t        snapid;
-	uint32_t        pad[3];
+	/*+++++lingyun+++++++*/
+	uint32_t  		zone;
+	/*+++++end++++++++++*/
+	uint32_t        pad[2];
 };
 
 struct sd_vdi_rsp {
@@ -192,7 +199,7 @@ struct sd_close_rsp{
 	uint32_t        data_length;
 	uint32_t        result;
 	uint32_t	pad[7];
-}
+};
 /*++++++++end+++++++++++*/
 struct sheepdog_inode {
 	char name[SD_MAX_VDI_LEN];

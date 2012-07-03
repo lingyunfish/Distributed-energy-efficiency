@@ -388,20 +388,39 @@ out:
 }
 
 /*+++++++++++lingyun++++++++++++++++*/
-void set_node_status(int zone,int status)
+
+static int cluster_close_local(const struct sd_req* req,struct sd_rsp *rsp,void *data)
+{
+	struct sd_close_req *hdr = (struct sd_close_req *)req;
+	int zone = hdr->zone;
+	
+	printf("into cluster_close_local\n");
+	if(zone == -1)
+		zone = sys->this_node.zone;
+	hdr->zone = zone;
+	//rsp->result = SD_RES_SUCCESS;
+	return SD_RES_SUCCESS;
+}
+int  set_node_status(int zone,int status)
 {
 	int i = 0,nr_vnodes;
 	struct sheepdog_node_list_entry *node_list = sys->nodes;
-	struct sheepdog_vnode_list_entry *vnode_list = sys->vnodes;
+	//struct sheepdog_vnode_list_entry *vnode_list = sys->vnodes;
 
 	while(i < sys->nr_nodes){
 		if( node_list[i].zone == zone){
 			node_list[i].state = status;
 		}
+		i++;
+	}
+	if(i >= sys->nr_nodes){
+		vprintf(SDOG_DEBUG,"Should not close a not exit zone\n");
+		return SD_RES_NO_ZONE;
 	}
 	//free_ordered_sd_vnode_list(sys->vnodes);
 	nr_vnodes = nodes_to_vnodes(sys->nodes,sys->nr_nodes,sys->vnodes);
 	sys->nr_vnodes = nr_vnodes;
+	return SD_RES_SUCCESS;
 	
 }
 static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
@@ -413,16 +432,22 @@ static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 	struct vnodes_cache *cache;
 	s = SD_STATUS_SWITCH;
 	struct sd_close_req *hdr = (struct sd_close_req *)req;
-	vprintf(SDOG_DEBUG,"node:%s is start closeing\n",node_to_str(sys->this_node));
 	zone = hdr->zone;
-	epoch = hdr->epoch;
+	eprintf("node:%s is start closeing,zone = %d\n",node_to_str(&sys->this_node),zone);
+	
+	//epoch = hdr->epoch;
+	if(zone == -1)
+		zone = sys->this_node.zone;
 	sys_stat_set(s);
-	set_node_status(zone,SD_NODE_CLOSE);
+	eprintf("check point1\n");
+	ret=set_node_status(zone,SD_NODE_CLOSE);
+	eprintf("check point2\n");
 	/*clean the vnode cache*/
-	free_orderd_cache();
+	//free_orderd_cache();
 	s = SD_STATUS_OK;
 	sys_stat_set(s);
-	return SD_RES_SUCCESS;
+	eprintf("check point3\n");
+	return ret;
 	
 }
 
@@ -482,6 +507,7 @@ static struct sd_op_template sd_ops[] = {
 	[SD_OP_CLOSE] = {
 		.type = SD_OP_TYPE_CLUSTER,
 		.force = 1,
+		.process_work = cluster_close_local,
 		.process_main = cluster_manual_close,
 	},
 

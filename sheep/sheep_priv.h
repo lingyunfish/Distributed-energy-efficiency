@@ -215,6 +215,11 @@ void setup_ordered_sd_vnode_list(struct request *req);
 int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 			      int *nr_vnodes, int *nr_zones);
 void free_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry *entries);
+
+/*++++++++++++lingyubn+++++++++++*/
+void free_orderd_cache(void);
+
+/*+++++++++++++end+++++++++++++*/
 int is_access_to_busy_objects(uint64_t oid);
 int is_access_local(struct sheepdog_vnode_list_entry *e, int nr_nodes,
 		    uint64_t oid, int copies);

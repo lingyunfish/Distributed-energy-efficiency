@@ -227,12 +227,16 @@ static void do_cluster_op(void *arg)
 	struct vdi_op_message *msg = arg;
 	int ret;
 	struct request *req;
-
+	
 	req = list_first_entry(&sys->pending_list, struct request, pending_list);
+	//eprintf("req->op:%d\n", req->op->type);
+	//dprintf("req-",req->);
+	
 	ret = do_process_work(req->op, (const struct sd_req *)&msg->req,
 			      (struct sd_rsp *)&msg->rsp, req->data);
-
+	
 	msg->rsp.result = ret;
+	
 }
 
 void do_cluster_request(struct work *work)
@@ -243,12 +247,12 @@ void do_cluster_request(struct work *work)
 	size_t size;
 
 	eprintf("%p %x\n", req, hdr->opcode);
-
+	
 	if (hdr->flags & SD_FLAG_CMD_WRITE)
 		size = sizeof(*msg);
 	else
 		size = sizeof(*msg) + hdr->data_length;
-
+	
 	msg = zalloc(size);
 	if (!msg) {
 		eprintf("failed to allocate memory\n");
@@ -259,7 +263,7 @@ void do_cluster_request(struct work *work)
 	msg->rsp = *((struct sd_vdi_rsp *)&req->rp);
 
 	list_add_tail(&req->pending_list, &sys->pending_list);
-
+	
 	if (has_process_work(req->op))
 		sys->cdrv->notify(msg, size, do_cluster_op);
 	else {

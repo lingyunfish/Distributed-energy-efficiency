@@ -241,22 +241,23 @@ static int cluster_close(int argc, char **argv)
 {
 	int fd, ret;
 	struct sd_close_req hdr;
-	struct sd_close_rsp *rsp = (struct sd_rsp *)&hdr;
+	struct sd_close_rsp *rsp = (struct sd_close_rsp *)&hdr;
 	unsigned rlen, wlen;
-
-
+	
+	printf("into cluster close! zone = %d\n",sdzone);
+	printf("host:%s,port:%d\n",sdhost,sdport);
 	fd = connect_to(sdhost, sdport);
 	if (fd < 0)
 		return EXIT_SYSFAIL;
 	memset(&hdr, 0, sizeof(hdr));
-
+	printf("connect successd\n");
 	hdr.opcode = SD_OP_CLOSE;
 	hdr.epoch = node_list_version;
 	hdr.zone = sdzone;
 
 	rlen = 0;
 	wlen = 0;
-	ret = exec_req(fd, &hdr, NULL, &wlen, &rlen);
+	ret = exec_req(fd, (struct sd_req *)&hdr, NULL, &wlen, &rlen);
 	close(fd);
 
 	if (ret) {
@@ -275,6 +276,7 @@ static int cluster_close(int argc, char **argv)
 
 static int cluster_wakeup(int argc, char **argv)
 {
+	printf("into cluster wakeup!\n");
 	return EXIT_SUCCESS;
 }
 
@@ -326,7 +328,7 @@ static int cluster_parser(int ch, char *opt)
 		break;
 	/*+++++++++lingyun++++++++++*/
 	case 'z':
-		sdzone = opt; 
+		sdzone = strtol(opt, &p, 10); 
 		break;
 	}
 

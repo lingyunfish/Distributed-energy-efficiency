@@ -41,7 +41,7 @@
 
 /*+++++++++++++++lingyun++++++++++++*/
 #define SD_OP_CLOSE 		 0X8B
-#define SD_OP_WAKEUP		 0X8C
+#define SD_OP_WAKEUP		 0XA2
 /*+++++++++++++++end++++++++++++++*/
 
 #define SD_FLAG_CMD_IO_LOCAL   0x0010
@@ -282,6 +282,7 @@ static inline const char *sd_strerror(int err)
 		{SD_RES_INVALID_EPOCH, "Invalid epoch"},
 		/*+++++++++++++lingyun+++++++++++++++++++*/
 		{SD_RES_SWITCH,"cluster power mode is switching"}, 
+		{SD_RES_NO_ZONE,"close/wake a wrong zone"},
 		/*++++++++++++++end++++++++++++++++++++*/
 	};
 

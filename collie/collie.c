@@ -21,7 +21,7 @@ static char program_name[] = "collie";
 const char *sdhost = "localhost";
 int sdport = SD_LISTEN_PORT;
 /*+++++++++lingyun++++++++*/
-int sdzone = sys->this_node.zone;
+int sdzone = -1;
 /*+++++++++end++++++++++*/
 int highlight = 1;
 int raw_output = 0;

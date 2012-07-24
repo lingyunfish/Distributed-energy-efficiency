@@ -136,16 +136,17 @@ struct vnodes_cache {
 	struct list_head list;
 };
 /*++++++++lingyun++++++++++++++*/
-static LIST_HEAD(vnodes_list);
+//static LIST_HEAD(vnodes_list);
 /*++++++++end++++++++++++++++*/
 
 int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 			      int *nr_vnodes, int *nr_zones)
 {
 	/*++++++++++++++lingyun++++++++++++++*/
-	//static LIST_HEAD(vnodes_list);
+	static LIST_HEAD(vnodes_list);
 	/*++++++++++++++end+++++++++++++++*/
 	struct vnodes_cache *cache;
+	//eprintf("into get cache\n");
 
 	list_for_each_entry(cache, &vnodes_list, list) {
 		if (cache->epoch == sys->epoch) {
@@ -153,7 +154,7 @@ int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 			*nr_vnodes = cache->nr_vnodes;
 			*nr_zones = cache->nr_zones;
 			cache->refcnt++;
-
+			//eprintf("cache->ref = %d\n",cache->refcnt);
 			return SD_RES_SUCCESS;
 		}
 	}
@@ -170,11 +171,11 @@ int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 	cache->nr_vnodes = sys->nr_vnodes;
 	cache->epoch = sys->epoch;
 	cache->refcnt++;
-
+	//eprintf("cache->ref = %d\n",cache->refcnt);
 	*entries = cache->vnodes;
 	*nr_vnodes = cache->nr_vnodes;
 	*nr_zones = cache->nr_zones;
-
+	
 	list_add(&cache->list, &vnodes_list);
 
 	return SD_RES_SUCCESS;
@@ -184,29 +185,47 @@ void free_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry *entries)
 {
 	struct vnodes_cache *cache;
 
-	if (!entries)
+	//eprintf("into free cache\n");
+	if (!entries){
+		eprintf("free a null entries!\n");
 		return;
+	}
 
 	cache = container_of(entries, struct vnodes_cache, vnodes[0]);
 	if (--cache->refcnt == 0) {
 		list_del(&cache->list);
 		free(cache);
+		//eprintf("cache->ref = 0\n");
 	}
+	
+		
 }
+
+
 
 /*++++++++++++++++lingyun+++++++++++++++++*/
-void free_orderd_cache(void)
+void free_sd_vnode_cache(struct sheepdog_vnode_list_entry *entries)
 {
 	struct vnodes_cache *cache;
-
-	list_for_each_entry(cache, &vnodes_list, list) {
-		if(cache->epoch == sys->epoch){
-			list_del(&cache->list);
-			free(cache);
-		}
-			
-	}
+	if(!entries)
+		return;
+	
+	eprintf("here in free\n");
+	cache = container_of(entries, struct vnodes_cache, vnodes[0]);
+	//cache->refcnt--;
+	list_del(&cache->list);
+	eprintf("cache->refcnt = %d\n",cache->refcnt);
+	//free_ordered_sd_vnode_list(entries);
+	/*while(cache->refcnt > 1){
+		//printf("cache->refcnt = %d\n",cache->refcnt);
+		cache = container_of(entries, struct vnodes_cache, vnodes[0]);
+		//free_ordered_sd_vnode_list(entries);
+		eprintf("cache->refcnt = %d\n",cache->refcnt);
+		sleep(1);
+	}*/
+	//free_ordered_sd_vnode_list(entries);
 }
+
 /*+++++++++++++++++end++++++++++++++++++*/
 
 void setup_ordered_sd_vnode_list(struct request *req)
@@ -404,6 +423,9 @@ static int get_cluster_status(struct sheepdog_node_list_entry *from,
 
 	switch (sys_stat) {
 	case SD_STATUS_HALT:
+	/*+++++++lingyun+++++++*/
+	case SD_STATUS_LOWPOWER:
+	/*++++++++end++++++++*/
 	case SD_STATUS_OK:
 		if (inc_epoch)
 			*inc_epoch = 1;
@@ -447,6 +469,11 @@ static int get_cluster_status(struct sheepdog_node_list_entry *from,
 	case SD_STATUS_SHUTDOWN:
 		ret = SD_RES_SHUTDOWN;
 		break;
+	/*+++++++++++lingyun+++++++++++*/
+	case SD_STATUS_SWITCH:
+		ret = SD_RES_SWITCH;
+		break;
+	/*++++++++++++end++++++++++++*/
 	default:
 		break;
 	}
@@ -558,8 +585,8 @@ static void update_cluster_info(struct join_message *msg,
 		sys->nodes[sys->nr_nodes++] = nodes[i];
 	}
 	qsort(sys->nodes, sys->nr_nodes, sizeof(*sys->nodes), node_cmp);
-
-	if (msg->cluster_status != SD_STATUS_OK) {
+	/*++++lingyun+++++*/
+	if (msg->cluster_status != SD_STATUS_OK ) {
 		nr_leave_nodes = msg->nr_leave_nodes;
 		le = get_latest_epoch();
 		for (i = 0; i < nr_leave_nodes; i++) {
@@ -581,7 +608,7 @@ static void update_cluster_info(struct join_message *msg,
 
 	sys->join_finished = 1;
 
-	if ((msg->cluster_status == SD_STATUS_OK || msg->cluster_status == SD_STATUS_HALT)
+	if ((msg->cluster_status == SD_STATUS_OK || msg->cluster_status == SD_STATUS_HALT )
 	     && msg->inc_epoch)
 		update_epoch_log(sys->epoch);
 
@@ -591,7 +618,7 @@ join_finished:
 	sys->nr_vnodes = nodes_to_vnodes(sys->nodes, sys->nr_nodes,
 					 sys->vnodes);
 	if (msg->cluster_status == SD_STATUS_OK ||
-	    msg->cluster_status == SD_STATUS_HALT) {
+	    msg->cluster_status == SD_STATUS_HALT ) {
 		if (msg->inc_epoch) {
 			sys->epoch++;
 			update_epoch_log(sys->epoch);

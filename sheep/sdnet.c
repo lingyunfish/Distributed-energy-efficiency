@@ -42,12 +42,21 @@ int is_access_local(struct sheepdog_vnode_list_entry *e, int nr_nodes,
 
 	if (oid == 0)
 		return 0;
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int , int, uint64_t , int);
+	if(sys_stat_lowpower())
+	{
+		obj_to_sheep_handle = obj_to_sheep_lp;
+		/*memset(nodes_lp, 0, sizeof(nodes_lp));
+		nr_lp = 0;*/
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
 
 	if (copies > nr_nodes)
 		copies = nr_nodes;
 
-	for (i = 0; i < copies; i++) {
-		n = obj_to_sheep(e, nr_nodes, oid, i);
+	for (i = 0; i < copies - sys->closed_zone; i++) {
+		n = obj_to_sheep_handle(e, nr_nodes, copies - sys->closed_zone, oid, i);
 
 		if (is_myself(e[n].addr, e[n].port))
 			return 1;
@@ -61,7 +70,12 @@ static void setup_access_to_local_objects(struct request *req)
 	struct sd_obj_req *hdr = (struct sd_obj_req *)&req->rq;
 	int copies;
 
-	if (hdr->flags & SD_FLAG_CMD_IO_LOCAL) {
+	/*+++++++++lingyun+++++++++*/
+	if(hdr->flags & SD_FLAG_CMD_LOG )
+		return;
+	/*++++++++++end++++++++++*/
+
+	if (hdr->flags & SD_FLAG_CMD_IO_LOCAL ) {
 		req->local_oid = hdr->oid;
 		return;
 	}
@@ -628,18 +642,33 @@ int write_object(struct sheepdog_vnode_list_entry *e,
 	struct sd_obj_req hdr;
 	int i, n, fd, ret;
 	char name[128];
-
+	
 	if (nr > zones)
 		nr = zones;
-
-	for (i = 0; i < nr; i++) {
-		unsigned rlen = 0, wlen = datalen;
-
-		n = obj_to_sheep(e, vnodes, oid, i);
+	/*++++++++++++lingyun+++++++++++++++++++*/
+	/*actually we should not oparate the vdi while the system status is lowpower */
+	//int status = sys_stat_get();
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int , int, uint64_t , int);
+	if(sys_stat_lowpower())
+	{	
+		eprintf("sys status is lowpower\n");
+		obj_to_sheep_handle = obj_to_sheep_lp;
+		/*memset(nodes_lp, 0, sizeof(nodes_lp));
+		nr_lp = 0;*/
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
+	
+	/*first write obj*/
+	//while()
+	unsigned rlen = 0, wlen = datalen;
+	for(i = 0;i < nr - sys->closed_zone ;i++){
+		
+		n = obj_to_sheep_handle(e, vnodes, nr - sys->closed_zone, oid, i);
 
 		if (is_myself(e[n].addr, e[n].port)) {
 			ret = write_object_local(oid, data, datalen, offset,
-						 flags, nr, node_version, create);
+						 flags, nr, node_version, create,0);
 
 			if (ret != 0) {
 				eprintf("fail %"PRIx64" %"PRIx32"\n", oid, ret);
@@ -679,6 +708,62 @@ int write_object(struct sheepdog_vnode_list_entry *e,
 			return -1;
 		}
 	}
+	/*++++++++++++end+++++++++++++++++++++*/
+	/*if sys is low power writer log */
+	for (; i < nr; i++) {
+		rlen = 0, wlen = datalen;
+		//unsigned rlen = 0, wlen = datalen;
+		
+		n = obj_to_sheep_handle(e, vnodes, nr - sys->closed_zone, oid, i);
+
+		if (is_myself(e[n].addr, e[n].port)) {
+			ret = write_object_local(oid, data, datalen, offset,
+						 flags, nr, node_version, create,1);
+
+			if (ret != 0) {
+				eprintf("fail %"PRIx64" %"PRIx32"\n", oid, ret);
+				return -1;
+			}
+
+			continue;
+		}
+
+		addr_to_str(name, sizeof(name), e[n].addr, 0);
+
+		fd = connect_to(name, e[n].port);
+		if (fd < 0) {
+			eprintf("failed to connect to host %s\n", name);
+			return -1;
+		}
+
+		memset(&hdr, 0, sizeof(hdr));
+		hdr.epoch = node_version;
+		if (create)
+			hdr.opcode = SD_OP_CREATE_AND_WRITE_OBJ;
+		else
+			hdr.opcode = SD_OP_WRITE_OBJ;
+
+		hdr.oid = oid;
+		hdr.copies = nr;
+
+		hdr.flags = flags;
+		if(sys_stat_lowpower())
+		{	
+			eprintf("set SD_FLAG_CMD_LOG\n");
+			hdr.flags |= SD_FLAG_CMD_WRITE | SD_FLAG_CMD_IO_LOCAL | SD_FLAG_CMD_LOG;
+		}
+		else 
+			hdr.flags |= SD_FLAG_CMD_WRITE | SD_FLAG_CMD_IO_LOCAL;
+		hdr.data_length = wlen;
+		hdr.offset = offset;
+
+		ret = exec_req(fd, (struct sd_req *)&hdr, data, &wlen, &rlen);
+		close(fd);
+		if (ret) {
+			eprintf("failed to update host %s\n", name);
+			return -1;
+		}
+	}
 
 	return 0;
 }
@@ -695,10 +780,20 @@ int read_object(struct sheepdog_vnode_list_entry *e,
 
 	if (nr > zones)
 		nr = zones;
+	/*+++++++++++++++++lingyun+++++++++++++++++*/
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int , int, uint64_t, int);
+	if(sys_stat_lowpower()){
+		obj_to_sheep_handle = obj_to_sheep_lp;
+		/*memset(nodes_lp, 0, sizeof(nodes_lp));
+		nr_lp = 0;*/
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
+	/*+++++++++++++++++end++++++++++++++++++++*/
 
 	/* search a local object first */
-	for (i = 0; i < nr; i++) {
-		n = obj_to_sheep(e, vnodes, oid, i);
+	for (i = 0; i < nr - sys->closed_zone; i++) {
+		n = obj_to_sheep_handle(e, vnodes, nr - sys->closed_zone, oid, i);
 
 		if (is_myself(e[n].addr, e[n].port)) {
 			ret = read_object_local(oid, data, datalen, offset, nr,
@@ -714,10 +809,10 @@ int read_object(struct sheepdog_vnode_list_entry *e,
 
 	}
 
-	for (i = 0; i < nr; i++) {
+	for (i = 0; i < nr - sys->closed_zone; i++) {
 		unsigned wlen = 0, rlen = datalen;
 
-		n = obj_to_sheep(e, vnodes, oid, i);
+		n = obj_to_sheep_handle(e, vnodes, nr - sys->closed_zone, oid, i);
 
 		addr_to_str(name, sizeof(name), e[n].addr, 0);
 

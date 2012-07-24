@@ -20,13 +20,16 @@ static void cal_total_vdi_size(uint32_t vid, char *name, char * tag,
 	if (is_current(i))
 		*size += i->vdi_size;
 }
-
+char *state[] ={
+	"live",
+	"closed"
+};
 static int node_list(int argc, char **argv)
 {
 	int i;
 
 	if (!raw_output)
-		printf("M   Id   Host:Port         V-Nodes       Zone\n");
+		printf("M   Id   Host:Port         V-Nodes       Zone		State\n");
 	for (i = 0; i < nr_nodes; i++) {
 		char data[128];
 
@@ -36,15 +39,15 @@ static int node_list(int argc, char **argv)
 		if (i == master_idx) {
 			if (highlight)
 				printf(TEXT_BOLD);
-			printf(raw_output ? "* %d %s %d %d\n" : "* %4d   %-20s\t%2d%11d\n",
+			printf(raw_output ? "* %d %s %d %d %s\n" : "* %4d   %-20s\t%2d%11d%16s\n",
 			       i, data, node_list_entries[i].nr_vnodes,
-			       node_list_entries[i].zone);
+			       node_list_entries[i].zone,state[node_list_entries[i].state]);
 			if (highlight)
 				printf(TEXT_NORMAL);
 		} else
-			printf(raw_output ? "- %d %s %d %d\n" : "- %4d   %-20s\t%2d%11d\n",
+			printf(raw_output ? "- %d %s %d %d %s\n" : "- %4d   %-20s\t%2d%11d%16s\n",
 			       i, data, node_list_entries[i].nr_vnodes,
-			       node_list_entries[i].zone);
+			       node_list_entries[i].zone,state[node_list_entries[i].state]);
 	}
 
 	return EXIT_SUCCESS;

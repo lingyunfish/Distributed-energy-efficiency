@@ -36,8 +36,7 @@
 #define SD_STATUS_SWITCH 			0x00000040
 #define SD_STATUS_LOWPOWER			0X00000080
 
-#define SD_NODE_CLOSE 				0XB1
-#define SD_NODE_LIVE				0XB2
+
 /*+++++++++++end+++++++++++++++++++*/
 
 
@@ -162,6 +161,9 @@ struct cluster_info {
 	struct work_queue *io_wqueue;
 	struct work_queue *deletion_wqueue;
 	struct work_queue *recovery_wqueue;
+	/*++++lingyun++++*/
+	uint32_t closed_zone;
+	/*+++++end+++++*/
 };
 
 struct siocb {
@@ -217,8 +219,7 @@ int get_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry **entries,
 void free_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry *entries);
 
 /*++++++++++++lingyubn+++++++++++*/
-void free_orderd_cache(void);
-
+void free_sd_vnode_cache(struct sheepdog_vnode_list_entry *entries);
 /*+++++++++++++end+++++++++++++*/
 int is_access_to_busy_objects(uint64_t oid);
 int is_access_local(struct sheepdog_vnode_list_entry *e, int nr_nodes,
@@ -233,7 +234,7 @@ void start_cpg_event_work(void);
 void do_io_request(struct work *work);
 int write_object_local(uint64_t oid, char *data, unsigned int datalen,
 		       uint64_t offset, uint16_t flags, int copies,
-		       uint32_t epoch, int create);
+		       uint32_t epoch, int create, int log );
 int read_object_local(uint64_t oid, char *data, unsigned int datalen,
 		      uint64_t offset, int copies, uint32_t epoch);
 
@@ -306,6 +307,15 @@ struct jrnl_descriptor *jrnl_begin(void *buf, size_t count, off_t offset,
 int jrnl_end(struct jrnl_descriptor * jd);
 int jrnl_recover(const char *jrnl_dir);
 
+/*+++++++++lingyun+++++++++++++*/
+/* log write*/
+struct log_descriptor *sd_log_write(void *buf, size_t count, off_t offset,
+		 uint64_t oid, uint16_t flags, uint32_t epoch, uint64_t cow_id, const char *log_dir, int create);
+int sd_log_close(struct log_descriptor *ld);
+
+
+/*++++++++++end++++++++++++++*/
+
 static inline int is_myself(uint8_t *addr, uint16_t port)
 {
 	return (memcmp(addr, sys->this_node.addr,
@@ -314,6 +324,13 @@ static inline int is_myself(uint8_t *addr, uint16_t port)
 }
 
 /* Cluster status/flag helper */
+
+/*+++++lingyun++++++*/
+static inline int sys_stat_lowpower(void)
+{
+	return sys->status & SD_STATUS_LOWPOWER;
+}
+/*++++++end+++++++*/
 
 static inline int sys_flag_nohalt(void)
 {

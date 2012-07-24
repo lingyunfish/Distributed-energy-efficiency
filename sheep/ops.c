@@ -300,6 +300,8 @@ static int local_stat_cluster(const struct sd_req *req, struct sd_rsp *rsp,
 	/*+++++++lingyun++++++++++*/
 	case SD_STATUS_SWITCH:
 		return SD_RES_SWITCH;
+	case SD_STATUS_LOWPOWER:
+		return SD_RES_LOWPOWER;
 	/*+++++++end++++++++++++*/
 	default:
 		return SD_RES_SYSTEM_ERROR;
@@ -403,22 +405,24 @@ static int cluster_close_local(const struct sd_req* req,struct sd_rsp *rsp,void 
 }
 int  set_node_status(int zone,int status)
 {
-	int i = 0,nr_vnodes;
+	int i = 0,nr_vnodes,flag = 0;
 	struct sheepdog_node_list_entry *node_list = sys->nodes;
 	//struct sheepdog_vnode_list_entry *vnode_list = sys->vnodes;
 
 	while(i < sys->nr_nodes){
 		if( node_list[i].zone == zone){
 			node_list[i].state = status;
+			flag = 1;
 		}
 		i++;
 	}
-	if(i >= sys->nr_nodes){
-		vprintf(SDOG_DEBUG,"Should not close a not exit zone\n");
+	
+	if(!flag){
+		eprintf(SDOG_DEBUG,"Should not close a not exit zone\n");
 		return SD_RES_NO_ZONE;
 	}
 	//free_ordered_sd_vnode_list(sys->vnodes);
-	nr_vnodes = nodes_to_vnodes(sys->nodes,sys->nr_nodes,sys->vnodes);
+	nr_vnodes = nodes_to_vnodes(sys->nodes, sys->nr_nodes, sys->vnodes);
 	sys->nr_vnodes = nr_vnodes;
 	return SD_RES_SUCCESS;
 	
@@ -427,9 +431,12 @@ static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 				void *data)
 {
 	
-	int s, nr_zones = 0,nr_objs =0 ,ret = SD_RES_SUCCESS;
+	int s, nr_zones = 0,nr_objs =0 ,ret = SD_RES_SUCCESS,res,vnodes;
 	int zone,epoch;
-	struct vnodes_cache *cache;
+	//struct vnodes_cache *cache;
+	struct sheepdog_vnode_list_entry *e;
+	
+	//nr_zones = get_zones_nr_from(sys->nodes, sys->nr_nodes);
 	s = SD_STATUS_SWITCH;
 	struct sd_close_req *hdr = (struct sd_close_req *)req;
 	zone = hdr->zone;
@@ -441,10 +448,21 @@ static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 	sys_stat_set(s);
 	eprintf("check point1\n");
 	ret=set_node_status(zone,SD_NODE_CLOSE);
-	eprintf("check point2\n");
+	sys->closed_zone++;
 	/*clean the vnode cache*/
-	//free_orderd_cache();
-	s = SD_STATUS_OK;
+	
+	res = get_ordered_sd_vnode_list(&e,&vnodes,&nr_zones);
+	if (res != SD_RES_SUCCESS)
+		panic("unrecoverable error\n");
+	eprintf("start clean cache!\n");
+	free_sd_vnode_cache(e);
+	//free_ordered_sd_vnode_list(e);
+	/*res = get_ordered_sd_vnode_list(&e,&vnodes,&nr_zones);
+	if (res != SD_RES_SUCCESS)
+		panic("unrecoverable error\n");
+	*/
+	eprintf("check point2\n");
+	s = SD_STATUS_LOWPOWER;
 	sys_stat_set(s);
 	eprintf("check point3\n");
 	return ret;

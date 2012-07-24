@@ -40,6 +40,10 @@ static char *mnt_path;
 static char *jrnl_path;
 static char *config_path;
 
+/*++++++lingyun++++++*/
+static char *log_path;
+/*+++++++end+++++++*/
+
 static mode_t def_dmode = S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP;
 mode_t def_fmode = S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP;
 
@@ -149,9 +153,77 @@ static int read_copy_from_cluster(struct request *req, uint32_t epoch,
 
 	e = req->entry;
 	nr = req->nr_vnodes;
+	/*++++++++++++lingyun+++++++++++++++++++*/
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int, int, uint64_t , int);
+	if(sys_stat_lowpower()){
+		/*memset(nodes_lp, 0, sizeof(nodes_lp));
+		nr_lp = 0;*/
+		obj_to_sheep_handle = obj_to_sheep_lp;
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
+	/*if(sys_stat_lowpower()){
+		for (i = 0; i < nr - sys->closed_zone; i++) {
+			n = obj_to_sheep_lp(e, nr, oid, i);
 
+			addr_to_str(name, sizeof(name), e[n].addr, 0);
+
+			if (is_myself(e[n].addr, e[n].port)) {
+				memset(&iocb, 0, sizeof(iocb));
+				iocb.epoch = epoch;
+				ret = store.open(oid, &iocb, 0);
+				if (ret != SD_RES_SUCCESS)
+					continue;
+
+				iocb.buf = buf;
+				iocb.length = SD_DATA_OBJ_SIZE;
+				iocb.offset = 0;
+				ret = store.read(oid, &iocb);
+				if (ret != SD_RES_SUCCESS)
+					continue;
+				store.close(oid, &iocb);
+				goto out;
+			}	
+
+			fd = connect_to(name, e[n].port);
+			if (fd < 0)
+				continue;
+
+			memset(&hdr, 0, sizeof(hdr));
+			hdr.opcode = SD_OP_READ_OBJ;
+			hdr.oid = oid;
+			hdr.epoch = epoch;
+
+			rlen = SD_DATA_OBJ_SIZE;
+			wlen = 0;
+			hdr.flags = SD_FLAG_CMD_IO_LOCAL;
+			hdr.data_length = rlen;
+			hdr.offset = 0;
+
+			ret = exec_req(fd, (struct sd_req *)&hdr, buf, &wlen, &rlen);
+
+			close(fd);
+
+			if (ret)
+				continue;
+
+			switch (rsp->result) {
+			case SD_RES_SUCCESS:
+				ret = SD_RES_SUCCESS;
+				goto out;
+			case SD_RES_OLD_NODE_VER:
+			case SD_RES_NEW_NODE_VER:
+			/* waits for the node list timer */
+		/*		break;
+			default:
+				;
+			}
+		}
+		
+	}*/
+	/*+++++++++++++end+++++++++++++++++++++*/
 	for (i = 0; i < nr; i++) {
-		n = obj_to_sheep(e, nr, oid, i);
+		n = obj_to_sheep_handle(e, nr, nr, oid, i);
 
 		addr_to_str(name, sizeof(name), e[n].addr, 0);
 
@@ -223,6 +295,17 @@ static int forward_read_obj_req(struct request *req)
 	struct sheepdog_vnode_list_entry *e;
 	uint64_t oid = hdr.oid;
 	int copies;
+	/*+++++++++++++++++lingyun+++++++++++++++++*/
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int , int, uint64_t , int);
+	if(sys_stat_lowpower())
+	{
+		obj_to_sheep_handle = obj_to_sheep_lp;
+		/*memset(nodes_lp, 0, sizeof(nodes_lp));
+		nr_lp = 0;*/
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
+	/*+++++++++++++++++end++++++++++++++++++++*/
 
 	e = req->entry;
 	nr = req->nr_vnodes;
@@ -238,8 +321,8 @@ static int forward_read_obj_req(struct request *req)
 	hdr.flags |= SD_FLAG_CMD_IO_LOCAL;
 
 	/* TODO: we can do better; we need to check this first */
-	for (i = 0; i < copies; i++) {
-		n = obj_to_sheep(e, nr, oid, i);
+	for (i = 0; i < copies - sys->closed_zone; i++) {
+		n = obj_to_sheep_handle(e, nr, copies - sys->closed_zone, oid, i);
 
 		if (is_myself(e[n].addr, e[n].port)) {
 			ret = do_local_io(req, hdr.epoch);
@@ -247,7 +330,7 @@ static int forward_read_obj_req(struct request *req)
 		}
 	}
 
-	n = obj_to_sheep(e, nr, oid, 0);
+	n = obj_to_sheep_handle(e, nr, copies, oid, 0);
 
 	fd = get_sheep_fd(e[n].addr, e[n].port, e[n].node_idx, hdr.epoch);
 	if (fd < 0) {
@@ -273,21 +356,31 @@ out:
 
 static int forward_write_obj_req(struct request *req)
 {
-	int i, n, nr, fd, ret, pollret;
+	int i, n, nr, fd, ret, pollret, flags;
 	unsigned wlen;
 	char name[128];
 	struct sd_obj_req hdr = *(struct sd_obj_req *)&req->rq;
 	struct sd_obj_rsp *rsp = (struct sd_obj_rsp *)&req->rp;
 	struct sheepdog_vnode_list_entry *e;
 	uint64_t oid = hdr.oid;
+	uint32_t datalen = hdr.data_length;
 	int copies;
 	struct pollfd pfds[SD_MAX_REDUNDANCY];
-	int nr_fds, local = 0;
+	int nr_fds, local = 0 , local_idx;
+	/*+++++++++++++++++lingyun+++++++++++++++++*/
+	static inline int (*obj_to_sheep_handle)(struct sheepdog_vnode_list_entry *, int , int, uint64_t, int);
+	if(sys_stat_lowpower()){
+		obj_to_sheep_handle = obj_to_sheep_lp;
+	}
+	else
+		obj_to_sheep_handle = obj_to_sheep_def;
+	/*+++++++++++++++++end++++++++++++++++++++*/
 
-	dprintf("%"PRIx64"\n", oid);
+	//dprintf("%"PRIx64"\n", oid);
 	e = req->entry;
 	nr = req->nr_vnodes;
 
+	flags = hdr.flags;
 	copies = hdr.copies;
 
 	/* temporary hack */
@@ -302,16 +395,26 @@ static int forward_write_obj_req(struct request *req)
 		pfds[i].fd = -1;
 
 	hdr.flags |= SD_FLAG_CMD_IO_LOCAL;
+	
 
-	wlen = hdr.data_length;
+	//wlen = datalen;
+	/*++++++++++++++lingyun+++++++++++++++*/
+	/*First write copy*/
 
+	/*+++++++++++++++end++++++++++++++++*/
+	/*then ,write log*/
 	for (i = 0; i < copies; i++) {
-		n = obj_to_sheep(e, nr, oid, i);
-
+		wlen = datalen;
+		
+		n = obj_to_sheep_handle(e, nr, copies - sys->closed_zone, oid, i);
+		
+		if(i >= copies - sys->closed_zone)
+			hdr.flags |=  SD_FLAG_CMD_LOG;
 		addr_to_str(name, sizeof(name), e[n].addr, 0);
-
+		eprintf("node ip:%s,port:%d\n",name,e[n].port);
 		if (is_myself(e[n].addr, e[n].port)) {
 			local = 1;
+			local_idx = i;
 			continue;
 		}
 
@@ -334,8 +437,15 @@ static int forward_write_obj_req(struct request *req)
 		pfds[nr_fds].events = POLLIN;
 		nr_fds++;
 	}
-
+	hdr.flags = flags;
+	hdr.flags |= SD_FLAG_CMD_IO_LOCAL;
 	if (local) {
+		if(local_idx >= copies - sys->closed_zone)
+			hdr.flags |=  SD_FLAG_CMD_LOG;
+		eprintf("do local io oid = %016"PRIx64"\n",hdr.oid);
+		eprintf("do local io flage = %u\n",hdr.flags);
+		/* here should change the request flags*/
+		req->rq.flags = hdr.flags;
 		ret = do_local_io(req, hdr.epoch);
 		rsp->result = ret;
 
@@ -456,7 +566,7 @@ err_open:
 
 int write_object_local(uint64_t oid, char *data, unsigned int datalen,
 		       uint64_t offset, uint16_t flags, int copies,
-		       uint32_t epoch, int create)
+		       uint32_t epoch, int create,int log)
 {
 	int ret;
 	struct request *req;
@@ -473,7 +583,10 @@ int write_object_local(uint64_t oid, char *data, unsigned int datalen,
 	else
 		hdr->opcode = SD_OP_WRITE_OBJ;
 	hdr->copies = copies;
-	hdr->flags = flags | SD_FLAG_CMD_WRITE;
+	if(sys_stat_lowpower() && log)
+		hdr->flags = flags | SD_FLAG_CMD_LOG | SD_FLAG_CMD_WRITE;
+	else 
+		hdr->flags = flags | SD_FLAG_CMD_WRITE;
 	hdr->offset = offset;
 	hdr->data_length = datalen;
 	req->data = data;
@@ -594,6 +707,23 @@ static int do_write_obj(struct siocb *iocb, struct sd_obj_req *req, uint32_t epo
 	return ret;
 }
 
+static int do_write_log(struct sd_obj_req *req, uint32_t epoch, void *data,int create)
+{
+	struct sd_obj_req *hdr = (struct sd_obj_req *)req;
+	void *ld = NULL;
+	int ret = SD_RES_SUCCESS;
+	char path[256];
+
+	memset(path,0,sizeof(path));
+	snprintf(path,sizeof(path),"%s%02d/%016"PRIx64,log_path,sys->closed_zone,hdr->oid);
+	eprintf("path = %s\n",path);
+	ld = sd_log_write(data,hdr->data_length,hdr->offset,hdr->oid,hdr->flags,epoch,hdr->cow_oid,path,create);
+	if(ld == NULL)
+		ret = SD_RES_WRITE_LOG_ERR;
+	sd_log_close(ld);
+	return ret;
+}
+
 int store_write_obj(const struct sd_req *req, struct sd_rsp *rsp, void *data)
 {
 	struct sd_obj_req *hdr = (struct sd_obj_req *)req;
@@ -601,17 +731,29 @@ int store_write_obj(const struct sd_req *req, struct sd_rsp *rsp, void *data)
 	int ret;
 	uint32_t epoch = hdr->epoch;
 	struct siocb iocb;
+	//eprintf("hdr->flags = %u\n",hdr->flags);
+	/*++++++++lingyun++++++++++*/
+	if(hdr->flags & SD_FLAG_CMD_LOG){
+		/*do log write*/
+		eprintf("++++++++++write log!+++++++++++++\n");
+		ret = do_write_log(hdr, epoch, request->data,0);
+		
+		//ret = SD_RES_SUCCESS;
 
-	memset(&iocb, 0, sizeof(iocb));
-	iocb.epoch = epoch;
-	iocb.flags = hdr->flags;
-	ret = store.open(hdr->oid, &iocb, 0);
-	if (ret != SD_RES_SUCCESS)
-		return ret;
+	}
+	/*+++++++end++++++++++++++*/
+	else{
+		memset(&iocb, 0, sizeof(iocb));
+		iocb.epoch = epoch;
+		iocb.flags = hdr->flags;
+		ret = store.open(hdr->oid, &iocb, 0);
+		if (ret != SD_RES_SUCCESS)
+			return ret;
 
-	ret = do_write_obj(&iocb, hdr, epoch, request->data);
+		ret = do_write_obj(&iocb, hdr, epoch, request->data);
 
-	store.close(hdr->oid, &iocb);
+		store.close(hdr->oid, &iocb);
+	}
 	return ret;
 }
 
@@ -621,41 +763,56 @@ int store_create_and_write_obj(const struct sd_req *req, struct sd_rsp *rsp, voi
 	struct request *request = (struct request *)data;
 	int ret;
 	uint32_t epoch = hdr->epoch;
-	char *buf = NULL;
-	struct siocb iocb;
+	
 
 	if (!hdr->copies) {
 		eprintf("the number of copies cannot be zero\n");
 		return SD_RES_INVALID_PARMS;
 	}
+	/*++++++++lingyun++++++++++*/
+	if(hdr->flags & SD_FLAG_CMD_LOG){
+		/*do log write*/
+		eprintf("+++++++++write log ++++++++++++");
+		ret = do_write_log(hdr, epoch, request->data,1);
+		//ret = SD_RES_SUCCESS;
+		//return ret;
+		//ret = SD_RES_SUCCESS;
 
-	memset(&iocb, 0, sizeof(iocb));
-	iocb.epoch = epoch;
-	iocb.flags = hdr->flags;
-	ret = store.open(hdr->oid, &iocb, 1);
-	if (ret != SD_RES_SUCCESS)
-		return ret;
-	if (hdr->flags & SD_FLAG_CMD_COW) {
-		dprintf("%" PRIu64 ", %" PRIx64 "\n", hdr->oid, hdr->cow_oid);
-
-		buf = xzalloc(SD_DATA_OBJ_SIZE);
-		ret = read_copy_from_cluster(request, hdr->epoch, hdr->cow_oid, buf);
-		if (ret != SD_RES_SUCCESS) {
-			eprintf("failed to read cow object\n");
-			goto out;
-		}
-		iocb.buf = buf;
-		iocb.length = SD_DATA_OBJ_SIZE;
-		iocb.offset = 0;
-		ret = store.write(hdr->oid, &iocb);
-		if (ret != SD_RES_SUCCESS)
-			goto out;
 	}
-	ret = do_write_obj(&iocb, hdr, epoch, request->data);
+	/*+++++++end++++++++++++++*/
+	else{
+		//eprintf("++++++++++write data++++++++++");
+		char *buf = NULL;
+		struct siocb iocb;
+		memset(&iocb, 0, sizeof(iocb));
+		iocb.epoch = epoch;
+		iocb.flags = hdr->flags;
+		ret = store.open(hdr->oid, &iocb, 1);
+		if (ret != SD_RES_SUCCESS)
+			return ret;
+		if (hdr->flags & SD_FLAG_CMD_COW) {
+			dprintf("%" PRIu64 ", %" PRIx64 "\n", hdr->oid, hdr->cow_oid);
+
+			buf = xzalloc(SD_DATA_OBJ_SIZE);
+			ret = read_copy_from_cluster(request, hdr->epoch, hdr->cow_oid, buf);
+			if (ret != SD_RES_SUCCESS) {
+				eprintf("failed to read cow object\n");
+				goto out;
+			}
+			iocb.buf = buf;
+			iocb.length = SD_DATA_OBJ_SIZE;
+			iocb.offset = 0;
+			ret = store.write(hdr->oid, &iocb);
+			if (ret != SD_RES_SUCCESS)
+				goto out;
+		}
+		ret = do_write_obj(&iocb, hdr, epoch, request->data);
 out:
 	free(buf);
 	store.close(hdr->oid, &iocb);
+	}
 	return ret;
+
 }
 
 static int do_local_io(struct request *req, uint32_t epoch)
@@ -665,7 +822,7 @@ static int do_local_io(struct request *req, uint32_t epoch)
 
 	hdr->epoch = epoch;
 	dprintf("%x, %" PRIx64" , %u\n", hdr->opcode, hdr->oid, epoch);
-
+	//eprintf("hdr->flage = %u\n",hdr->flags);
 	ret = do_process_work(req->op, &req->rq, &req->rp, req);
 
 	if (ret == SD_RES_NO_OBJ && hdr->flags & SD_FLAG_CMD_RECOVERY) {
@@ -1948,6 +2105,43 @@ static int init_jrnl_path(const char *base_path)
 	return 0;
 }
 
+/*++++++++lingyun+++++++++++++*/
+#define LOG_PATH "/log/"
+#define MAX_ZONE 3
+
+static int init_log_path(const char *base_path)
+{
+	int new, ret,i,new1;
+	char path[256];
+
+	log_path = zalloc(strlen(base_path) + strlen(LOG_PATH) + 1);
+	sprintf(log_path,"%s"LOG_PATH,base_path);
+	ret = init_path(log_path,&new);
+	if(ret)
+		return ret;
+	if(new){
+		for(i = 0; i < MAX_ZONE; i++){
+			memset(path,0,sizeof(path));
+			snprintf(path,sizeof(path),"%s%02d/",log_path,i);
+			ret = init_path(path,&new1);
+			if(ret)
+				return ret;
+			if(new1)
+				continue;
+			else
+				return 1;
+		}
+		return 0;
+	}
+	else{
+		/*should do recovery*/
+		return 0;
+	}
+	
+}
+
+/*++++++++end++++++++++++++++*/
+
 #define CONFIG_PATH "/config"
 
 static int init_config_path(const char *base_path)
@@ -1983,6 +2177,12 @@ int init_store(const char *d)
 	ret = init_config_path(d);
 	if (ret)
 		return ret;
+
+	/*+++++lingyun++++++*/
+	ret = init_log_path(d);
+	if(ret)
+		return ret;
+	/*++++++end+++++++*/
 
 	ret = store.init(obj_path);
 	if (ret)

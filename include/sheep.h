@@ -46,6 +46,14 @@
 
 #define SD_FLAG_CMD_IO_LOCAL   0x0010
 #define SD_FLAG_CMD_RECOVERY 0x0020
+/*+++++++++++lingyun++++++++++++*/
+#define SD_FLAG_CMD_LOG 0X0040
+
+#define SD_NODE_CLOSE 				0X01
+#define SD_NODE_LIVE				0X00
+
+/*+++++++++++end++++++++++++++*/
+
 
 /* set this flag when you want to read a VDI which is opened by
    another client.  Note that the obtained data may not be the latest
@@ -185,6 +193,178 @@ static inline int same_zone(struct sheepdog_vnode_list_entry *e, int n1, int n2)
 	return e[n1].zone != 0 && e[n1].zone == e[n2].zone;
 }
 
+/*+++++++++++lingyun++++++++++++++++*/
+static inline int is_closed_node(struct sheepdog_vnode_list_entry *e,int n1)
+{
+	return e[n1].state == SD_NODE_CLOSE;
+}
+
+//int nodes_lp[SD_MAX_REDUNDANCY];
+//int nr_lp;
+
+static inline int get_nth_node_lp_debug(struct sheepdog_vnode_list_entry *entries,
+					int nr_entries, int nr_obj,int base, int n)
+{
+	int nr = 0;
+	int nodes[SD_MAX_REDUNDANCY];
+	int idx = base, i, j = n, flag = 0;
+	int new_base;
+	if(j > nr_obj - 1){
+		flag = 1;
+		j = nr_obj - 1;
+	}
+
+	while(is_closed_node(entries, idx)){
+		/*if node is closed then the next living node should not the same zone /node with this node*/
+		nodes[nr++] = idx;
+next:
+		idx = (idx + 1) % nr_entries;
+		if (idx == base) {
+			panic("bug");
+		}
+		for (i = 0; i < nr; i++) {
+			if (same_node(entries, idx, nodes[i]))
+				
+				goto next;
+			if (same_zone(entries, idx, nodes[i]))
+				
+				goto next;
+		}
+	}
+	
+	new_base = idx;
+	
+	while (j--) {
+		nodes[nr++] = idx;
+next1:
+		idx = (idx + 1) % nr_entries;
+		if (idx == new_base) {
+			panic("bug"); /* not found */
+		}
+		if(is_closed_node(entries,idx))
+			goto next1;
+		for (i = 0; i < nr; i++) {
+			if (same_node(entries, idx, nodes[i]))
+				/* this node is already selected, so skip here */
+				goto next1;
+			if (same_zone(entries, idx, nodes[i]))
+				/* this node is in the same zone, so skip here */
+				goto next1;
+		}
+	}
+	nodes[nr++] = idx;
+	/*log begin with new_base
+	* for example , if n = nr_obj ,then the  idex is the first  vnode from new_base
+	*/
+	if(flag){
+		n = n - nr_obj + 1;
+		idx = new_base;
+		while (n--) {
+			nodes[nr++] = idx;
+next2:
+			idx = (idx + 1) % nr_entries;
+			if (idx == new_base) {
+				panic("bug"); /* not found */
+			}
+			if(is_closed_node(entries,idx))
+				goto next2;
+			for (i = 0; i < nr; i++) {
+				if (same_node(entries, idx, nodes[i]))
+					
+					goto next2;
+			}
+		}
+	}
+
+	return idx;
+
+}
+
+
+static inline int get_nth_node_lp(struct sheepdog_vnode_list_entry *entries,
+					int nr_entries, int base, int n, int flag)
+{
+	
+	int nr = 0;
+	int nodes[SD_MAX_REDUNDANCY];
+	int idx = base, i;
+
+	while(is_closed_node(entries, idx)){
+		/*if node is closed then the next living node should not the same zone /node with this node*/
+		nodes[nr++] = idx;
+next1:
+		idx = (idx + 1) % nr_entries;
+		if (idx == base) {
+			panic("bug");
+		}
+		for (i = 0; i < nr; i++) {
+			if (same_node(entries, idx, nodes[i]))
+				
+				goto next1;
+			if (same_zone(entries, idx, nodes[i]))
+				
+				goto next1;
+		}
+	}
+	while (n--) {
+		nodes[nr++] = idx;
+next:
+		idx = (idx + 1) % nr_entries;
+		if (idx == base) {
+			panic("bug"); /* not found */
+		}
+		if(is_closed_node(entries,idx))
+			goto next;
+		for (i = 0; i < nr; i++) {
+			if (same_node(entries, idx, nodes[i]))
+				/* this node is already selected, so skip here */
+				goto next;
+			if(flag)
+				if (same_zone(entries, idx, nodes[i]))
+				/* this node is in the same zone, so skip here */
+					goto next;
+		}
+	}
+
+	return idx;
+}
+
+static inline int hval_to_sheep_lp(struct sheepdog_vnode_list_entry *entries,
+				int nr_entries, int nr_obj,uint64_t id, int idx)
+{
+	int i;
+	struct sheepdog_vnode_list_entry *e = entries, *n;
+
+	for (i = 0; i < nr_entries - 1; i++, e++) {
+		n = e + 1;
+		if (id > e->id && id <= n->id){
+			break;
+		}
+	}
+	/*
+	while(n->state == SD_NODE_CLOSE){
+		i = (i + 1) % nr_entries;
+		n = entries + (i + 1) % nr_entries;
+				
+	}*/
+	/*if(idx < nr_obj)
+		return get_nth_node_lp(entries, nr_entries, (i + 1) % nr_entries, idx, 1);
+	else 
+		return get_nth_node_lp(entries, nr_entries,(i + 1) % nr_entries, idx, 0);*/
+		return get_nth_node_lp_debug(entries, nr_entries, nr_obj, (i + 1) % nr_entries, idx);
+}
+
+static inline int obj_to_sheep_lp(struct sheepdog_vnode_list_entry *entries,
+			       int nr_entries, int nr_obj, uint64_t oid, int idx)
+{
+	//nr_obj is acatually number of obj
+	uint64_t id = fnv_64a_buf(&oid, sizeof(oid), FNV1A_64_INIT);
+
+	return hval_to_sheep_lp(entries, nr_entries, nr_obj, id, idx);
+}
+
+/*+++++++++++end++++++++++++++++++*/
+
 /* traverse the virtual node list and return the n'th one */
 static inline int get_nth_node(struct sheepdog_vnode_list_entry *entries,
 			       int nr_entries, int base, int n)
@@ -220,7 +400,7 @@ static inline int hval_to_sheep(struct sheepdog_vnode_list_entry *entries,
 
 	for (i = 0; i < nr_entries - 1; i++, e++) {
 		n = e + 1;
-		if (id > e->id && id <= n->id)
+		if (id > e->id && id <= n->id )
 			break;
 	}
 	return get_nth_node(entries, nr_entries, (i + 1) % nr_entries, idx);
@@ -232,6 +412,12 @@ static inline int obj_to_sheep(struct sheepdog_vnode_list_entry *entries,
 	uint64_t id = fnv_64a_buf(&oid, sizeof(oid), FNV1A_64_INIT);
 
 	return hval_to_sheep(entries, nr_entries, id, idx);
+}
+
+static inline int obj_to_sheep_def(struct sheepdog_vnode_list_entry *entries,
+			       int nr_entries, int nr_obj, uint64_t oid, int idx)
+{
+	return obj_to_sheep(entries, nr_entries, oid, idx);
 }
 
 static inline int is_sheep_op(uint8_t op)
@@ -283,6 +469,8 @@ static inline const char *sd_strerror(int err)
 		/*+++++++++++++lingyun+++++++++++++++++++*/
 		{SD_RES_SWITCH,"cluster power mode is switching"}, 
 		{SD_RES_NO_ZONE,"close/wake a wrong zone"},
+		{SD_RES_LOWPOWER,"Cluster is in lowpower mode"},
+		{SD_RES_WRITE_LOG_ERR,"write log error!"},
 		/*++++++++++++++end++++++++++++++++++++*/
 	};
 

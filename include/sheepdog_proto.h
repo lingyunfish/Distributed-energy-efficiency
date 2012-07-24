@@ -32,6 +32,7 @@
 #define SD_FLAG_CMD_WRITE    0x01
 #define SD_FLAG_CMD_COW      0x02
 
+
 #define SD_RES_SUCCESS       0x00 /* Success */
 #define SD_RES_UNKNOWN       0x01 /* Unknown error */
 #define SD_RES_NO_OBJ        0x02 /* No object found */
@@ -60,12 +61,16 @@
 #define SD_RES_HALT 0x19 /* Sheepdog is stopped doing IO */
 #define SD_RES_MANUAL_RECOVER   0x1A /* Users should not manually recover this cluster */
 
+
 /*++++++++lingyun++++++++++*/
 #define SD_RES_NO_ZONE 		  0X1C
+#define SD_RES_ERR_OPEN		  0X1F	
 /*+++++++++end++++++++++*/
 
 /*+++++++++lingyun++++++++++++++++*/
 #define SD_RES_SWITCH 0X1B /*cluster power mode is switching*/
+#define SD_RES_LOWPOWER 0x1D
+#define SD_RES_WRITE_LOG_ERR 0X1E
 /*++++++++++end+++++++++++++++++*/
 
 /*

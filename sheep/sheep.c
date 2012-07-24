@@ -206,7 +206,9 @@ int main(int argc, char **argv)
 	if (!sys->cpg_wqueue || !sys->gateway_wqueue || !sys->io_wqueue ||
 	    !sys->recovery_wqueue || !sys->deletion_wqueue)
 		exit(1);
-
+	/*+++lingyun+++++*/
+	sys->closed_zone = 0;
+	/*+++end+++++*/
 	vprintf(SDOG_NOTICE, "sheepdog daemon (version %s) started\n", PACKAGE_VERSION);
 
 	while (!sys_stat_shutdown() || sys->nr_outstanding_reqs != 0)

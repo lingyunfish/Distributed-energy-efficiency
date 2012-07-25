@@ -203,6 +203,7 @@ int main(int argc, char **argv)
 	sys->io_wqueue = init_work_queue(NR_IO_WORKER_THREAD);
 	sys->recovery_wqueue = init_work_queue(1);
 	sys->deletion_wqueue = init_work_queue(1);
+	sys->wakeup_wqueue = init_work_queue(1);
 	if (!sys->cpg_wqueue || !sys->gateway_wqueue || !sys->io_wqueue ||
 	    !sys->recovery_wqueue || !sys->deletion_wqueue)
 		exit(1);

@@ -41,7 +41,7 @@
 
 /*+++++++++++++++lingyun++++++++++++*/
 #define SD_OP_CLOSE 		 0X8B
-#define SD_OP_WAKEUP		 0XA2
+#define SD_OP_WAKEUP		 0X8C
 /*+++++++++++++++end++++++++++++++*/
 
 #define SD_FLAG_CMD_IO_LOCAL   0x0010
@@ -124,6 +124,30 @@ struct sd_list_rsp {
 	uint32_t        pad[7];
 };
 
+/*++++++++++++lingyun++++++++++++++*/
+struct sd_log_list_req{
+	uint8_t		proto_ver;
+	uint8_t		opcode;
+	uint16_t	flags;
+	uint32_t	epoch;
+	uint32_t        id;
+	uint32_t        data_length;
+	uint32_t        closed_zone;
+	uint32_t        pad[7];
+};
+struct sd_log_list_rsp {
+	uint8_t		proto_ver;
+	uint8_t		opcode;
+	uint16_t	flags;
+	uint32_t	epoch;
+	uint32_t        id;
+	uint32_t        data_length;
+	uint32_t        result;
+	uint32_t        pad[7];
+};
+
+
+/*+++++++++++++end+++++++++++++++*/
 struct sd_node_req {
 	uint8_t		proto_ver;
 	uint8_t		opcode;
@@ -471,6 +495,7 @@ static inline const char *sd_strerror(int err)
 		{SD_RES_NO_ZONE,"close/wake a wrong zone"},
 		{SD_RES_LOWPOWER,"Cluster is in lowpower mode"},
 		{SD_RES_WRITE_LOG_ERR,"write log error!"},
+		{SD_RES_DUP_OP,"wakup/close zone have the same state"},
 		/*++++++++++++++end++++++++++++++++++++*/
 	};
 

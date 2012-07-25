@@ -64,6 +64,7 @@
 
 /*++++++++lingyun++++++++++*/
 #define SD_RES_NO_ZONE 		  0X1C
+#define SD_RES_DUP_OP		  0X20
 #define SD_RES_ERR_OPEN		  0X1F	
 /*+++++++++end++++++++++*/
 

@@ -321,6 +321,15 @@ static int local_get_obj_list(const struct sd_req *req, struct sd_rsp *rsp,
 			    (struct sd_list_rsp *)rsp, data);
 }
 
+/*++++++++lingyun+++++++*/
+static int local_get_log_obj(const struct sd_req *req, struct sd_rsp *rsp,
+			      void *data)
+{
+	return get_log_obj_list((const struct sd_log_list_req *)req,
+					(struct sd_log_list_rsp *)rsp, data);
+}
+/*+++++++++end++++++++*/
+
 static int local_get_epoch(const struct sd_req *req, struct sd_rsp *rsp,
 			   void *data)
 {
@@ -391,18 +400,6 @@ out:
 
 /*+++++++++++lingyun++++++++++++++++*/
 
-static int cluster_close_local(const struct sd_req* req,struct sd_rsp *rsp,void *data)
-{
-	struct sd_close_req *hdr = (struct sd_close_req *)req;
-	int zone = hdr->zone;
-	
-	printf("into cluster_close_local\n");
-	if(zone == -1)
-		zone = sys->this_node.zone;
-	hdr->zone = zone;
-	//rsp->result = SD_RES_SUCCESS;
-	return SD_RES_SUCCESS;
-}
 int  set_node_status(int zone,int status)
 {
 	int i = 0,nr_vnodes,flag = 0;
@@ -411,22 +408,107 @@ int  set_node_status(int zone,int status)
 
 	while(i < sys->nr_nodes){
 		if( node_list[i].zone == zone){
+			if (node_list[i].state == status)
+				break;
 			node_list[i].state = status;
 			flag = 1;
 		}
 		i++;
 	}
-	
+	if(i < sys->nr_nodes)
+		return SD_RES_DUP_OP;
 	if(!flag){
 		eprintf(SDOG_DEBUG,"Should not close a not exit zone\n");
 		return SD_RES_NO_ZONE;
 	}
+	
 	//free_ordered_sd_vnode_list(sys->vnodes);
 	nr_vnodes = nodes_to_vnodes(sys->nodes, sys->nr_nodes, sys->vnodes);
 	sys->nr_vnodes = nr_vnodes;
 	return SD_RES_SUCCESS;
 	
 }
+
+
+static int cluster_wakeup_local(const struct sd_req* req,struct sd_rsp *rsp,void *data)
+{
+	struct sd_close_req *hdr = (struct sd_close_req *)req;
+	eprintf("into cluster_close_local\n");
+	if(hdr->zone == -1)
+		hdr->zone = sys->this_node.zone;
+
+	
+	return SD_RES_SUCCESS;
+}
+
+static int cluster_manual_wakeup(const struct sd_req *req, struct sd_rsp *rsp,
+				void *data)
+{
+	
+	int nr_zones = 0 ,ret = SD_RES_SUCCESS,res,vnodes;
+	int zone,epoch;
+
+	struct sheepdog_vnode_list_entry *e;
+	struct sheepdog_node_list_entry old_nodes[SD_MAX_NODES];
+	struct sheepdog_node_list_entry cur_nodes[SD_MAX_NODES];
+	struct sheepdog_vnode_list_entry old_vnodes[SD_MAX_VNODES];
+	struct sheepdog_vnode_list_entry cur_vnodes[SD_MAX_VNODES];
+	struct sd_close_req *hdr = (struct sd_close_req *)req;
+	
+	zone = hdr->zone;
+	epoch =hdr->epoch;
+	memcpy(old_vnodes, sys->vnodes, sizeof(sys->vnodes));
+	memcpy(old_nodes, sys->nodes, sizeof(sys->nodes));
+	int i;
+	for(i = 0 ; i < sys->nr_nodes; i++){
+		eprintf("show:%s\n",node_to_str(old_nodes + i));
+	}
+	eprintf("node:%s is start wakeup,zone = %d\n",node_to_str(&sys->this_node),zone);
+	sys_stat_set(SD_STATUS_SWITCH);
+	ret=set_node_status(zone, SD_NODE_LIVE);
+	if(ret != SD_RES_SUCCESS)
+		goto out;
+	sys->closed_zone--;
+	ret = get_ordered_sd_vnode_list(&e,&vnodes,&nr_zones);
+	if (ret != SD_RES_SUCCESS){
+		panic("unrecoverable error\n");
+		goto out;
+	}
+	eprintf("start clean cache!\n");
+	free_sd_vnode_cache(e);
+
+	/*如果本地节点不属于唤醒的分区，那么该节点不需要进行数据恢复*/
+	if(sys->this_node.zone != zone)
+	{
+		if(sys->closed_zone == 0)
+			sys_stat_set(SD_STATUS_OK);
+		else 
+			sys_stat_set(SD_STATUS_LOWPOWER);
+		return SD_RES_SUCCESS;
+	}
+	memcpy(cur_vnodes, sys->vnodes, sizeof(sys->vnodes));
+	memcpy(cur_nodes, sys->nodes, sizeof(sys->nodes));
+	res = start_wakeup(old_nodes, sys->nr_nodes, old_vnodes, sys->nr_vnodes ,cur_nodes ,sys->nr_nodes, cur_vnodes, sys->nr_vnodes, zone, sys->closed_zone, epoch);
+	if(res != 0 )
+		eprintf("some error happend!\n");
+out:
+	return ret;
+
+	
+}
+
+static int cluster_close_local(const struct sd_req* req,struct sd_rsp *rsp,void *data)
+{
+	struct sd_close_req *hdr = (struct sd_close_req *)req;
+	
+	
+	printf("into cluster_close_local\n");
+	if(hdr->zone == -1)
+		hdr->zone = sys->this_node.zone;
+	
+	return SD_RES_SUCCESS;
+}
+
 static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 				void *data)
 {
@@ -437,23 +519,25 @@ static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 	struct sheepdog_vnode_list_entry *e;
 	
 	//nr_zones = get_zones_nr_from(sys->nodes, sys->nr_nodes);
-	s = SD_STATUS_SWITCH;
+	//s = SD_STATUS_SWITCH;
 	struct sd_close_req *hdr = (struct sd_close_req *)req;
 	zone = hdr->zone;
 	eprintf("node:%s is start closeing,zone = %d\n",node_to_str(&sys->this_node),zone);
 	
 	//epoch = hdr->epoch;
-	if(zone == -1)
-		zone = sys->this_node.zone;
-	sys_stat_set(s);
+	sys_stat_set(SD_STATUS_SWITCH);
 	eprintf("check point1\n");
 	ret=set_node_status(zone,SD_NODE_CLOSE);
+	if(ret != SD_RES_SUCCESS)
+		goto out;
 	sys->closed_zone++;
 	/*clean the vnode cache*/
 	
-	res = get_ordered_sd_vnode_list(&e,&vnodes,&nr_zones);
-	if (res != SD_RES_SUCCESS)
+	ret = get_ordered_sd_vnode_list(&e,&vnodes,&nr_zones);
+	if (ret != SD_RES_SUCCESS){
 		panic("unrecoverable error\n");
+		goto out;
+	}
 	eprintf("start clean cache!\n");
 	free_sd_vnode_cache(e);
 	//free_ordered_sd_vnode_list(e);
@@ -465,6 +549,7 @@ static int cluster_manual_close(const struct sd_req *req, struct sd_rsp *rsp,
 	s = SD_STATUS_LOWPOWER;
 	sys_stat_set(s);
 	eprintf("check point3\n");
+out:
 	return ret;
 	
 }
@@ -529,11 +614,12 @@ static struct sd_op_template sd_ops[] = {
 		.process_main = cluster_manual_close,
 	},
 
-	/*[SD_OP_WAKEUP] = {
+	[SD_OP_WAKEUP] = {
 		.type = SD_OP_TYPE_CLUSTER,
 		.force = 1,
+		.process_work = cluster_wakeup_local,
 		.process_main = cluster_manual_wakeup,
-	},*/
+	},
 	/*++++++++++end+++++++++++*/
 
 	/* local operations */
@@ -570,7 +656,12 @@ static struct sd_op_template sd_ops[] = {
 		.type = SD_OP_TYPE_LOCAL,
 		.process_work = local_get_obj_list,
 	},
-
+	/*++++++++lingyun+++++++++++*/
+	[SD_OP_GET_LOG_OBJ] = {
+		.type = SD_OP_TYPE_LOCAL,
+		.process_work = local_get_log_obj,
+	},
+	/*+++++++++end++++++++++++*/
 	[SD_OP_GET_EPOCH] = {
 		.type = SD_OP_TYPE_LOCAL,
 		.process_work = local_get_epoch,

@@ -41,7 +41,7 @@ static char *jrnl_path;
 static char *config_path;
 
 /*++++++lingyun++++++*/
-static char *log_path;
+char *log_path;
 /*+++++++end+++++++*/
 
 static mode_t def_dmode = S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP;
@@ -139,6 +139,39 @@ out:
 	return res;
 }
 
+/*+++++++++++++++lingyun++++++++++++++++++++++*/
+int get_log_obj_list(const struct sd_log_list_req *hdr, struct sd_log_list_rsp *rsp, void *data)
+{
+	uint64_t *list = (uint64_t *)data;
+	int i, nr = 0;
+	int res = SD_RES_SUCCESS;
+	int buf_len;
+	char *buf;
+	struct slogcb logcb = { 0 };
+
+	buf_len = (1 << 22);
+	buf = zalloc(buf_len);
+	if (!buf) {
+		eprintf("failed to allocate memory\n");
+		res = SD_RES_NO_MEM;
+		goto out;
+	}
+
+	logcb.buf = buf;
+	logcb.length = 0;
+	logcb.nr_c_zone = hdr->closed_zone;
+	store.get_log_objlist(&logcb);
+	nr = merge_objlist(list, nr, (uint64_t *)logcb.buf, logcb.length);
+out:
+	free(buf);
+	rsp->data_length = nr * sizeof(uint64_t);
+	for (i = 0; i < nr; i++) {
+		dprintf("oid %"PRIx64"\n", list[i]);
+	}
+	return res;
+}
+
+/*++++++++++++++++end+++++++++++++++++++++++*/
 static int read_copy_from_cluster(struct request *req, uint32_t epoch,
 				  uint64_t oid, char *buf)
 {
@@ -1219,6 +1252,33 @@ struct recovery_work {
 	struct sheepdog_vnode_list_entry cur_vnodes[SD_MAX_VNODES];
 };
 
+/*+++++++++++++lingyun++++++++++++++++++*/
+struct wakeup_work{
+	enum rw_state state;	
+	uint32_t epoch;
+	uint32_t done;
+	//struct timer timer;
+	//int retry;
+	struct work work;
+	//int nr_blocking;
+	int count;
+	uint64_t *oids;
+	int wakeup_zone;
+	
+	int old_closed_zone;
+	int cur_closed_zone;
+
+	int old_nr_nodes;
+	struct sheepdog_node_list_entry *old_nodes;
+	int cur_nr_nodes;
+	struct sheepdog_node_list_entry *cur_nodes;
+	int old_nr_vnodes;
+	struct sheepdog_vnode_list_entry *old_vnodes;
+	int cur_nr_vnodes;
+	struct sheepdog_vnode_list_entry *cur_vnodes;
+};
+/*++++++++++++++end+++++++++++++++++++*/
+
 static struct recovery_work *next_rw;
 static struct recovery_work *recovering_work;
 
@@ -1912,6 +1972,324 @@ fail:
 	rw->count = 0;
 	return;
 }
+
+/*++++++++++++lingyun++++++++++++++++*/
+//struct work_queue *wakeup_wqueue;
+static int get_log_obj(struct sheepdog_node_list_entry *e, int  closed_zone,
+			   uint8_t *buf, size_t buf_size)
+{
+	int fd, ret;
+	unsigned wlen, rlen;
+	char name[128];
+	struct sd_log_list_req hdr;
+	struct sd_log_list_rsp *rsp;
+
+	addr_to_str(name, sizeof(name), e->addr, 0);
+
+	dprintf("%s %"PRIu32"\n", name, e->port);
+
+	fd = connect_to(name, e->port);
+	if (fd < 0) {
+		eprintf("%s %"PRIu32"\n", name, e->port);
+		return -1;
+	}
+
+	wlen = 0;
+	rlen = buf_size;
+
+	memset(&hdr, 0, sizeof(hdr));
+	hdr.opcode = SD_OP_GET_LOG_OBJ;
+	hdr.closed_zone = closed_zone;
+	hdr.flags = 0;
+	hdr.data_length = rlen;
+
+	ret = exec_req(fd, (struct sd_req *)&hdr, buf, &wlen, &rlen);
+
+	close(fd);
+
+	rsp = (struct sd_log_list_rsp *)&hdr;
+
+	if (ret || rsp->result != SD_RES_SUCCESS) {
+		eprintf("retrying: %"PRIu32", %"PRIu32"\n", ret, rsp->result);
+		return -1;
+	}
+
+	dprintf("%lu\n", rsp->data_length / sizeof(uint64_t));
+
+	return rsp->data_length / sizeof(uint64_t);
+}
+
+static int screen_log_obj_list(struct sheepdog_vnode_list_entry *nodes, int nodes_nr,
+			   uint64_t *list, int list_nr, int nr_objs, int cur_closed_zone)
+{
+	int ret, i, cp, idx;
+	struct strbuf buf = STRBUF_INIT;
+
+	for (i = 0; i < list_nr; i++) {
+		for (cp = 0; cp < nr_objs - cur_closed_zone; cp++) {
+			idx = obj_to_sheep_lp(nodes, nodes_nr, nr_objs - cur_closed_zone, list[i], cp);
+			if (is_myself(nodes[idx].addr, nodes[idx].port))
+				break;
+		}
+		if (cp == nr_objs)
+			continue;
+		//如果对象存放在本地，则将对象增加到链表
+		strbuf_add(&buf, &list[i], sizeof(uint64_t));
+	}
+	memcpy(list, buf.buf, buf.len);
+	ret = buf.len / sizeof(uint64_t);
+	dprintf("%d\n", ret);
+	strbuf_release(&buf);
+
+	return ret;
+}
+
+static int prepare_obj_list(struct wakeup_work *upw,
+			 struct sheepdog_node_list_entry *old_entry, int old_nr,
+			 struct sheepdog_node_list_entry *cur_entry, int cur_nr,
+			 int nr_objs)
+{
+	int i;
+	uint8_t *buf = NULL;
+	size_t buf_size = SD_DATA_OBJ_SIZE; /* FIXME */
+	int retry_cnt;
+
+	buf = malloc(buf_size);
+	if(!buf)
+		goto fail;
+	for(i = 0; i < old_nr; i++){
+		int nr;
+		retry_cnt = 0;
+		if(old_entry[i].state == SD_NODE_CLOSE)
+			continue;
+retry:
+		eprintf("read_obj_from:%s\n",node_to_str(old_entry + i));
+		nr = get_log_obj(old_entry + i, upw->old_closed_zone, buf, buf_size);
+		if (nr < 0) {
+			retry_cnt++;
+			if (retry_cnt > MAX_RETRY_CNT) {
+				eprintf("failed to get object list\n");
+				eprintf("some objects may be lost\n");
+				continue;
+			} else {
+				dprintf("trying to get object list again\n");
+				sleep(1);
+				goto retry;
+			}
+		}
+		nr = screen_log_obj_list(upw->cur_vnodes, upw->cur_nr_vnodes, (uint64_t *)buf,
+				     nr, nr_objs ,upw->cur_closed_zone);
+		if (nr)
+			upw->count = merge_objlist(upw->oids, upw->count, (uint64_t *)buf, nr);
+	}
+	eprintf("%d\n", upw->count);
+	free(buf);
+	return 0;
+fail:
+	free(buf);
+	//rw->retry = 1;
+	return -1;
+}
+
+
+static void __start_wakeup(struct work *work)
+{
+	struct wakeup_work *upw = container_of(work, struct wakeup_work, work);
+	//uint32_t epoch = rw->epoch;
+	int nr_objs;
+
+	nr_objs = get_max_copies(upw->cur_nodes, upw->cur_nr_nodes);
+
+	if (prepare_obj_list(upw, upw->old_nodes, upw->old_nr_nodes, upw->cur_nodes,
+			  upw->cur_nr_nodes, nr_objs) != 0) {
+		eprintf("fatal wakeup error\n");
+		goto fail;
+	}
+
+	return;
+fail:
+	upw->count = 0;
+	return;
+
+	
+}
+static void wakeup_one(struct work *work)
+{
+	struct wakeup_work *upw = container_of(work, struct wakeup_work, work);
+	char *buf = NULL;
+	int ret,fd;
+	uint64_t oid = upw->oids[upw->done];
+	int i;
+	int tgt_idx;
+	int old_live_zone = sys->nr_sobjs - upw->old_closed_zone;
+	struct sheepdog_vnode_list_entry *e;
+	char name[128];
+	struct sd_obj_req hdr;
+	struct sd_obj_rsp *rsp = (struct sd_obj_rsp *)&hdr;
+	uint32_t epoch = upw->epoch;
+	//struct siocb iocb;
+
+	eprintf("%"PRIu32" %"PRIu32", %16"PRIx64"\n", upw->done, upw->count, oid);
+	//memset(&iocb, 0, sizeof(iocb));
+	//iocb->epoch = upw->epoch;
+
+	if (is_vdi_obj(oid))
+		buf = malloc(sizeof(struct sheepdog_inode));
+	else if (is_vdi_attr_obj(oid))
+		buf = malloc(SD_MAX_VDI_ATTR_VALUE_LEN);
+	else if (is_data_obj(oid))
+		buf = valloc(SD_DATA_OBJ_SIZE);
+	else
+		buf = malloc(SD_DATA_OBJ_SIZE);
+	if (!sys->nr_sobjs)
+		goto fail;
+	
+	for(i = 0; i < old_live_zone; i++){
+		unsigned wlen = 0, rlen;
+		tgt_idx = obj_to_sheep_lp(upw->old_vnodes, upw->old_nr_vnodes, old_live_zone, oid, i);
+		e = upw->old_vnodes + tgt_idx;
+		addr_to_str(name, sizeof(name), e->addr, 0);
+		fd = connect_to(name, e->port);	
+		if (fd < 0) {
+			eprintf("failed to connect to %s:%"PRIu32"\n", name, e->port);
+			goto out;
+		}
+
+		if (is_vdi_obj(oid))
+			rlen = sizeof(struct sheepdog_inode);
+		else if (is_vdi_attr_obj(oid))
+			rlen = SD_MAX_VDI_ATTR_VALUE_LEN;
+		else
+			rlen = SD_DATA_OBJ_SIZE;
+
+		memset(&hdr, 0, sizeof(hdr));
+		hdr.opcode = SD_OP_READ_OBJ;
+		hdr.oid = oid;
+		hdr.epoch = upw->epoch;
+		hdr.flags = SD_FLAG_CMD_IO_LOCAL;
+		//hdr.tgt_epoch = tgt_epoch;
+		hdr.data_length = rlen;
+
+		ret = exec_req(fd, (struct sd_req *)&hdr, buf, &wlen, &rlen);
+
+		close(fd);
+		
+		if (ret != 0) {
+				eprintf("%"PRIu32"\n", rsp->result);
+				goto out;
+		}
+		
+		rsp = (struct sd_obj_rsp *)&hdr;
+		
+		if (rsp->result == SD_RES_SUCCESS) {
+			char path[PATH_MAX], tmp_path[PATH_MAX];
+			int flags = O_DSYNC | O_RDWR | O_CREAT;
+		
+			snprintf(path, sizeof(path), "%s%08u/%016" PRIx64, obj_path,
+					 epoch, oid);
+			snprintf(tmp_path, sizeof(tmp_path), "%s%08u/%016" PRIx64 ".tmp",
+					 obj_path, epoch, oid);
+		
+			fd = open(tmp_path, flags, def_fmode);
+			if (fd < 0) {
+				eprintf("failed to open %s: %m\n", tmp_path);
+				goto out;
+			}
+		
+			ret = write(fd, buf, rlen);
+			if (ret != rlen) {
+				eprintf("failed to write object\n");
+				goto out;
+			}
+		
+			close(fd);
+		
+			dprintf("rename %s to %s\n", tmp_path, path);
+			ret = rename(tmp_path, path);
+			if (ret < 0) {
+				eprintf("failed to rename %s to %s: %m\n", tmp_path, path);
+				goto out;
+			}
+			//dprintf("recovered oid %"PRIx64" to epoch %"PRIu32"\n", oid, epoch);
+			goto out;
+		}
+		if (rsp->result == SD_RES_NEW_NODE_VER || rsp->result == SD_RES_OLD_NODE_VER
+	    	|| rsp->result == SD_RES_NETWORK_ERROR) {
+			eprintf("retrying: %"PRIu32", %"PRIx64"\n", rsp->result, oid);
+			//upw->retry = 1;
+			continue;
+			//goto out;
+		}
+
+		if (rsp->result != SD_RES_NO_OBJ || rsp->data_length == 0) {
+			eprintf("%"PRIu32"\n", rsp->result);
+			goto out;
+		}
+		
+	}
+fail:
+	eprintf("failed to recover object %"PRIx64"\n", oid);
+out:
+	free(buf);
+	return;
+
+}
+static void wakeup_done(struct work *work)
+{
+	struct wakeup_work *upw = container_of(work, struct wakeup_work, work);
+	uint64_t oid;
+	if(upw->state == RW_INIT)
+		upw->state = RW_RUN;
+	else 
+		upw->done++;
+	oid = upw->oids[upw->done];
+	if( upw->done < upw->count){
+		upw->work.fn = wakeup_one;
+		queue_work(sys->wakeup_wqueue, &upw->work);
+		return;
+	}
+	eprintf("wakeup compeletd:zone = %d\n",upw->wakeup_zone);
+	if(sys->closed_zone)
+		sys_stat_set(SD_STATUS_LOWPOWER);
+	else 
+		sys_stat_set(SD_STATUS_OK);
+	free(upw->oids);
+	free(upw);
+}
+
+int start_wakeup(struct sheepdog_node_list_entry *old_nodes, int nr_old_nodes, struct sheepdog_vnode_list_entry * old_vnods, int nr_old_vnodes, 
+	struct sheepdog_node_list_entry *cur_nodes, int nr_cur_nodes, struct sheepdog_vnode_list_entry *cur_vnode, int nr_cur_vnodes, uint32_t zone,int closed_zone,uint32_t epoch)
+{
+	struct wakeup_work *upw;
+	//wakeup_wqueue = init_work_queue(1);
+	upw = zalloc(sizeof(struct wakeup_work));
+	if (!upw)
+		return -1;
+	upw->oids = malloc(1 << 20); /* FIXME */
+	upw->count = 0;
+	upw->done = 0;
+	upw->epoch = epoch;
+	upw->state = RW_INIT;
+	upw->wakeup_zone = zone;
+	upw->old_nodes = old_nodes;
+	upw->old_nr_nodes = nr_old_nodes;
+	upw->cur_nodes = cur_nodes;
+	upw->cur_nr_nodes = nr_cur_nodes;
+	upw->old_vnodes = old_vnods;
+	upw->old_nr_vnodes = nr_old_vnodes;
+	upw->cur_vnodes = cur_vnode;
+	upw->cur_nr_vnodes = nr_cur_vnodes;
+	upw->cur_closed_zone = closed_zone;
+	upw->old_closed_zone = closed_zone + 1;
+	upw->work.fn = __start_wakeup;
+	upw->work.done = wakeup_done;
+
+	queue_work(sys->wakeup_wqueue, &upw->work);
+	return 0;
+}
+
+/*+++++++++++++end+++++++++++++++++*/
+
 
 int start_recovery(uint32_t epoch)
 {

@@ -27,6 +27,7 @@
 
 
 extern char *obj_path;
+extern char *log_path;
 
 extern mode_t def_fmode;
 
@@ -181,6 +182,41 @@ out:
 	return ret;
 }
 
+/*+++++++++++++++++lingyun+++++++++++++++++++++*/
+static int simple_store_get_log_objlist(struct slogcb * logcb)
+{
+	
+	struct strbuf buf = STRBUF_INIT;
+	int closed_zone = logcb->nr_c_zone;
+	uint64_t *objlist = (uint64_t *)logcb->buf;
+	DIR *dir;
+	struct dirent *d;
+	int ret = SD_RES_SUCCESS;
+	
+	strbuf_addf(&buf, "%s%02d/", log_path, closed_zone);
+	eprintf("%s\n", buf.buf);
+	dir = opendir(buf.buf);
+	if (!dir) {
+		ret = SD_RES_EIO;
+		goto out;
+	}
+	while ((d = readdir(dir))) {
+		uint64_t oid;
+		if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+			continue;
+
+		oid = strtoull(d->d_name, NULL, 16);
+		if (oid == 0)
+			continue;
+
+		objlist[logcb->length++] = oid;
+	}
+	closedir(dir);
+out:
+	strbuf_release(&buf);
+	return ret;
+}
+/*++++++++++++++++++end++++++++++++++++++++++*/
 static int simple_store_link(uint64_t oid, struct siocb *iocb, int tgt_epoch)
 {
        char old[PATH_MAX], new[PATH_MAX];
@@ -208,6 +244,7 @@ struct store_driver store = {
 	.close = simple_store_close,
 	.get_objlist = simple_store_get_objlist,
 	.link = simple_store_link,
+	.get_log_objlist = simple_store_get_log_objlist,
 };
 
 void register_store_driver(struct store_driver *driver)

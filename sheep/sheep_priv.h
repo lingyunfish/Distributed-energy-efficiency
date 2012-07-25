@@ -25,6 +25,10 @@
 
 #define SD_OP_GET_OBJ_LIST   0xA1
 #define SD_OP_GET_EPOCH      0XA2
+/*+++++lingyun+++++++*/
+#define SD_OP_GET_LOG_OBJ 	 0XA3
+/*++++++end++++++++*/
+
 
 #define SD_STATUS_OK                0x00000001
 #define SD_STATUS_WAIT_FOR_FORMAT   0x00000002
@@ -35,6 +39,7 @@
 /*++++++++++lingyun++++++++++++++++++*/
 #define SD_STATUS_SWITCH 			0x00000040
 #define SD_STATUS_LOWPOWER			0X00000080
+
 
 
 /*+++++++++++end+++++++++++++++++++*/
@@ -162,6 +167,7 @@ struct cluster_info {
 	struct work_queue *deletion_wqueue;
 	struct work_queue *recovery_wqueue;
 	/*++++lingyun++++*/
+	struct work_queue *wakeup_wqueue;
 	uint32_t closed_zone;
 	/*+++++end+++++*/
 };
@@ -174,7 +180,14 @@ struct siocb {
 	uint32_t length;
 	uint64_t offset;
 };
-
+/*+++++++++lingyun+++++++++*/
+struct slogcb{
+	//uint16_t flags;
+	uint32_t length;
+	int nr_c_zone;
+	void *buf;
+};
+/*++++++++++end++++++++++*/
 struct store_driver {
 	const char *driver_name;
 	int (*init)(char *path);
@@ -185,6 +198,7 @@ struct store_driver {
 	/* Operations in recovery */
 	int (*get_objlist)(struct siocb *);
 	int (*link)(uint64_t oid, struct siocb *, int tgt_epoch);
+	int (*get_log_objlist)(struct slogcb *);
 };
 
 extern void register_store_driver(struct store_driver *);
@@ -220,6 +234,9 @@ void free_ordered_sd_vnode_list(struct sheepdog_vnode_list_entry *entries);
 
 /*++++++++++++lingyubn+++++++++++*/
 void free_sd_vnode_cache(struct sheepdog_vnode_list_entry *entries);
+
+
+
 /*+++++++++++++end+++++++++++++*/
 int is_access_to_busy_objects(uint64_t oid);
 int is_access_local(struct sheepdog_vnode_list_entry *e, int nr_nodes,
@@ -254,6 +271,10 @@ int store_create_and_write_obj(const struct sd_req *, struct sd_rsp *, void *);
 int store_write_obj(const struct sd_req *, struct sd_rsp *, void *);
 int store_read_obj(const struct sd_req *, struct sd_rsp *, void *);
 int store_remove_obj(const struct sd_req *, struct sd_rsp *, void *);
+/*++++++++++++++lingyun+++++++++++++++++++*/
+int start_wakeup(struct sheepdog_node_list_entry *old_nodes, int nr_old_nodes, struct sheepdog_vnode_list_entry * old_vnods, int nr_old_vnodes, 
+	struct sheepdog_node_list_entry *cur_nodes, int nr_cur_nodes, struct sheepdog_vnode_list_entry *cur_vnode, int nr_cur_vnodes, uint32_t zone,int closed_zone,uint32_t epoch);
+/*+++++++++++++++end++++++++++++++++++++*/
 
 #define NR_GW_WORKER_THREAD 4
 #define NR_IO_WORKER_THREAD 4

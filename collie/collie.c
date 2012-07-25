@@ -16,6 +16,7 @@
 #include "sheepdog_proto.h"
 #include "sheep.h"
 #include "collie.h"
+#include "logger.h"
 
 static char program_name[] = "collie";
 const char *sdhost = "localhost";
@@ -121,6 +122,7 @@ static int update_node_list(int max_nodes, int epoch)
 	nr_vnodes = nodes_to_vnodes(node_list_entries, nr_nodes, vnode_list_entries);
 	node_list_version = hdr.epoch;
 	master_idx = rsp->master_idx;
+	//fprintf(stderr,"node_list_version = %d\n",node_list_version);
 out:
 	if (buf)
 		free(buf);

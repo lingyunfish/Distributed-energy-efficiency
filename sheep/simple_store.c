@@ -193,7 +193,8 @@ static int simple_store_get_log_objlist(struct slogcb * logcb)
 	struct dirent *d;
 	int ret = SD_RES_SUCCESS;
 	
-	strbuf_addf(&buf, "%s%02d/", log_path, closed_zone);
+	//strbuf_addf(&buf, "%s%02d/", log_path, closed_zone);
+	strbuf_addf(&buf, "%s", log_path);
 	eprintf("%s\n", buf.buf);
 	dir = opendir(buf.buf);
 	if (!dir) {

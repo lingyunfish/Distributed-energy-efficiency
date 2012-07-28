@@ -747,10 +747,11 @@ static int do_write_log(struct sd_obj_req *req, uint32_t epoch, void *data,int c
 	int ret = SD_RES_SUCCESS;
 	char path[256];
 
-	memset(path,0,sizeof(path));
-	snprintf(path,sizeof(path),"%s%02d/%016"PRIx64,log_path,sys->closed_zone,hdr->oid);
+	memset(path, 0, sizeof(path));
+	//snprintf(path,sizeof(path),"%s%02d/%016"PRIx64,log_path,sys->closed_zone,hdr->oid);
+	snprintf(path, sizeof(path), "%s%016"PRIx64, log_path, hdr->oid);
 	eprintf("path = %s\n",path);
-	ld = sd_log_write(data,hdr->data_length,hdr->offset,hdr->oid,hdr->flags,epoch,hdr->cow_oid,path,create);
+	ld = sd_log_write(data, hdr->data_length, hdr->offset, hdr->oid, hdr->flags, epoch, hdr->cow_oid, path, create);
 	if(ld == NULL)
 		ret = SD_RES_WRITE_LOG_ERR;
 	sd_log_close(ld);
@@ -2498,7 +2499,7 @@ static int init_log_path(const char *base_path)
 	if(ret)
 		return ret;
 	if(new){
-		for(i = 0; i < MAX_ZONE; i++){
+		/*for(i = 0; i < MAX_ZONE; i++){
 			memset(path,0,sizeof(path));
 			snprintf(path,sizeof(path),"%s%02d/",log_path,i);
 			ret = init_path(path,&new1);
@@ -2508,7 +2509,7 @@ static int init_log_path(const char *base_path)
 				continue;
 			else
 				return 1;
-		}
+		}*/
 		return 0;
 	}
 	else{

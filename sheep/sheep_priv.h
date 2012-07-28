@@ -187,6 +187,8 @@ struct slogcb{
 	int nr_c_zone;
 	void *buf;
 };
+
+//struct 
 /*++++++++++end++++++++++*/
 struct store_driver {
 	const char *driver_name;
